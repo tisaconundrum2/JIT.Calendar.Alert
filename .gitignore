@@ -1,0 +1,14 @@
+# Build artifacts
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+
+# NuGet packages
+packages/
+*.nupkg
+
+# Published output
+publish/

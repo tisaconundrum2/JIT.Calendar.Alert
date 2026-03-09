@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:JustInTimeAlerts.ViewModels"
+             xmlns:models="clr-namespace:JustInTimeAlerts.Models"
+             xmlns:converters="clr-namespace:JustInTimeAlerts.Converters"
+             x:Class="JustInTimeAlerts.MainPage"
+             x:DataType="vm:MainViewModel"
+             Title="JIT Meeting Alerts">
+
+    <ContentPage.Resources>
+        <ResourceDictionary>
+            <converters:StringNotEmptyConverter x:Key="StringNotEmptyConverter" />
+            <converters:ServiceButtonTextConverter x:Key="ServiceButtonTextConverter" />
+            <Style x:Key="CardFrame" TargetType="Frame">
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="12" />
+                <Setter Property="Margin" Value="0,4" />
+                <Setter Property="BorderColor" Value="{AppThemeBinding Light=#DDDDDD, Dark=#444444}" />
+                <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=White, Dark=#2A2A2A}" />
+                <Setter Property="HasShadow" Value="True" />
+            </Style>
+        </ResourceDictionary>
+    </ContentPage.Resources>
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16" Spacing="8">
+
+            <!-- Header -->
+            <Label Text="&#x23F0; Just-In-Time Meeting Alerts"
+                   FontSize="22"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center"
+                   Margin="0,8,0,4" />
+
+            <Label Text="Get notified exactly when your meeting starts."
+                   FontSize="13"
+                   HorizontalOptions="Center"
+                   HorizontalTextAlignment="Center"
+                   TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"
+                   Margin="0,0,0,12" />
+
+            <!-- Add ICS URL -->
+            <Frame Style="{StaticResource CardFrame}">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Add Calendar by URL" FontAttributes="Bold" />
+                    <Entry Text="{Binding IcsUrl}"
+                           Placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
+                           Keyboard="Url"
+                           ClearButtonVisibility="WhileEditing" />
+                    <Button Text="Add Calendar URL"
+                            Command="{Binding AddCalendarUrlCommand}"
+                            HorizontalOptions="Fill" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Import ICS File -->
+            <Frame Style="{StaticResource CardFrame}">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Import Local .ics File" FontAttributes="Bold" />
+                    <Button Text="Browse and Import File"
+                            Command="{Binding ImportFileCommand}"
+                            HorizontalOptions="Fill" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Status Message -->
+            <Label Text="{Binding StatusMessage}"
+                   FontSize="13"
+                   HorizontalTextAlignment="Center"
+                   TextColor="{AppThemeBinding Light=#0078D4, Dark=#66B3FF}"
+                   IsVisible="{Binding StatusMessage, Converter={StaticResource StringNotEmptyConverter}}"
+                   Margin="0,4" />
+
+            <!-- Calendar List -->
+            <Frame Style="{StaticResource CardFrame}">
+                <VerticalStackLayout Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label Text="Tracked Calendars"
+                               FontAttributes="Bold"
+                               VerticalOptions="Center" />
+                        <Button Grid.Column="1"
+                                Text="Sync Now"
+                                Command="{Binding SyncNowCommand}"
+                                Padding="10,5"
+                                FontSize="12" />
+                    </Grid>
+
+                    <CollectionView ItemsSource="{Binding CalendarSources}"
+                                    EmptyView="No calendars added yet.">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="models:CalendarSource">
+                                <Grid Padding="4,8" ColumnDefinitions="*,Auto">
+                                    <VerticalStackLayout Grid.Column="0">
+                                        <Label Text="{Binding DisplayName}"
+                                               FontSize="13"
+                                               LineBreakMode="TailTruncation" />
+                                        <Label Text="{Binding LastSyncTime, StringFormat='Last sync: {0:g}'}"
+                                               FontSize="11"
+                                               TextColor="{AppThemeBinding Light=#888888, Dark=#AAAAAA}" />
+                                    </VerticalStackLayout>
+                                    <Button Grid.Column="1"
+                                            Text="X"
+                                            BackgroundColor="Transparent"
+                                            TextColor="Red"
+                                            Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.RemoveCalendarCommand}"
+                                            CommandParameter="{Binding Id}"
+                                            Padding="8,4" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Background Service Toggle -->
+            <Frame Style="{StaticResource CardFrame}">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Background Monitoring" FontAttributes="Bold" />
+                    <Label Text="Keeps the app alive in the background and checks every minute for meetings starting right now."
+                           FontSize="12"
+                           TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}" />
+                    <Button Text="{Binding IsServiceRunning, Converter={StaticResource ServiceButtonTextConverter}}"
+                            Command="{Binding ToggleServiceCommand}"
+                            HorizontalOptions="Fill" />
+                </VerticalStackLayout>
+            </Frame>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
