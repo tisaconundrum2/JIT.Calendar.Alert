@@ -115,7 +115,7 @@ public class IcsParserService
                     var rangeStart = new CalDateTime(DateTime.UtcNow);
                     var rangeEnd   = new CalDateTime(DateTime.UtcNow.AddDays(30));
                     var occurrences = e.GetOccurrences(rangeStart)
-                        .Where(occ => occ.Period.StartTime <= rangeEnd);
+                        .TakeWhile(occ => occ.Period.StartTime <= rangeEnd);
                     foreach (var occ in occurrences)
                     {
                         events.Add(new MeetingEvent
