@@ -1,6 +1,7 @@
 #if ANDROID
 using Android.App;
 using Android.Content;
+using Android.Media;
 using Android.OS;
 using JustInTimeAlerts.Models;
 
@@ -58,6 +59,43 @@ public class AndroidNotificationService
             .SetAutoCancel(true);
 
         _notificationManager?.Notify(_nextId++, builder.Build());
+
+        PlayAlertSound();
+    }
+
+    /// <summary>
+    /// Plays <c>Time_Up.mp3</c> from the app's bundled assets using
+    /// <see cref="MediaPlayer"/>.  The player is released automatically on
+    /// completion.  Any failure is silently swallowed so it never blocks the
+    /// notification path.
+    /// </summary>
+    private static void PlayAlertSound()
+    {
+        try
+        {
+            var context = global::Android.App.Application.Context;
+            var afd = context.Assets?.OpenFd("Time_Up.mp3");
+            if (afd == null)
+                return;
+
+            var player = new MediaPlayer();
+            player.SetDataSource(afd.FileDescriptor, afd.StartOffset, afd.Length);
+            afd.Close();
+
+            player.SetAudioAttributes(
+                new AudioAttributes.Builder()
+                    .SetUsage(AudioUsageKind.Alarm)!
+                    .SetContentType(AudioContentType.Sonification)!
+                    .Build()!);
+
+            player.Prepare();
+            player.Completion += (_, _) => player.Release();
+            player.Start();
+        }
+        catch (Exception)
+        {
+            // Sound playback is best-effort; never let it break the notification.
+        }
     }
 
     private static string BuildContentText(MeetingEvent meeting)
