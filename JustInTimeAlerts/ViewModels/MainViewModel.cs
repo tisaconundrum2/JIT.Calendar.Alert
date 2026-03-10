@@ -205,6 +205,120 @@ public partial class MainViewModel : ObservableObject, IDisposable
         StatusMessage = "Debug log cleared.";
     }
 
+    // -------------------------------------------------------------------------
+    // Backup / Restore
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Exports every URL-based calendar source to a JSON file and opens the
+    /// system share sheet so the user can save it to Downloads, Drive, etc.
+    /// File-based sources are excluded because their paths are device-specific
+    /// and will not survive a reinstall.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportBackupAsync()
+    {
+        try
+        {
+            var urlSources = _repository.Sources
+                .Where(s => !string.IsNullOrWhiteSpace(s.Url))
+                .Select(s => s.Url!)
+                .ToList();
+
+            if (urlSources.Count == 0)
+            {
+                StatusMessage = "Nothing to export – no URL-based calendars are saved.";
+                return;
+            }
+
+            var json = System.Text.Json.JsonSerializer.Serialize(urlSources,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+            // Write to a temporary file in the app cache directory, then share.
+            var fileName = $"jit-calendar-backup-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            var filePath = Path.Combine(FileSystem.CacheDirectory, fileName);
+            await File.WriteAllTextAsync(filePath, json);
+
+            _logger.Log($"Backup exported: {fileName} ({urlSources.Count} URL(s)).");
+
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "Save JIT Calendar Backup",
+                File = new ShareFile(filePath, "application/json"),
+            });
+
+            StatusMessage = $"Backup exported ({urlSources.Count} calendar URL(s)).";
+        }
+        catch (Exception ex)
+        {
+            _logger.Log($"ERROR exporting backup: {ex.GetType().Name}: {ex.Message}");
+            StatusMessage = $"Export failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Lets the user pick a previously exported backup JSON file and re-adds
+    /// any URLs that are not already in the repository.
+    /// </summary>
+    [RelayCommand]
+    private async Task ImportBackupAsync()
+    {
+        try
+        {
+            var result = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = "Select a JIT Calendar Backup (.json)",
+                FileTypes = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+                {
+                    { DevicePlatform.Android,      new[] { "application/json", "*/*" } },
+                    { DevicePlatform.iOS,           new[] { "public.json" } },
+                    { DevicePlatform.MacCatalyst,   new[] { "public.json" } },
+                    { DevicePlatform.WinUI,         new[] { ".json" } },
+                }),
+            });
+
+            if (result == null)
+                return;
+
+            StatusMessage = "Reading backup file…";
+            var json = await File.ReadAllTextAsync(result.FullPath);
+            var urls = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
+
+            if (urls == null || urls.Count == 0)
+            {
+                StatusMessage = "Backup file contained no calendar URLs.";
+                return;
+            }
+
+            var existingUrls = _repository.Sources
+                .Where(s => s.Url != null)
+                .Select(s => s.Url!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            int added = 0;
+            foreach (var url in urls)
+            {
+                if (string.IsNullOrWhiteSpace(url) || existingUrls.Contains(url))
+                    continue;
+
+                _repository.Add(new CalendarSource { Url = url.Trim() });
+                existingUrls.Add(url.Trim());
+                added++;
+            }
+
+            RefreshSources();
+            _logger.Log($"Backup imported: {added} new URL(s) added (skipped {urls.Count - added} duplicate(s)).");
+            StatusMessage = added > 0
+                ? $"Backup restored – {added} calendar(s) added."
+                : "All URLs in the backup were already present; nothing added.";
+        }
+        catch (Exception ex)
+        {
+            _logger.Log($"ERROR importing backup: {ex.GetType().Name}: {ex.Message}");
+            StatusMessage = $"Import failed: {ex.Message}";
+        }
+    }
+
     [RelayCommand]
     private void ToggleService()
     {
