@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
 using JustInTimeAlerts.Services;
 using JustInTimeAlerts.ViewModels;
@@ -18,7 +19,16 @@ public static class MauiProgram
             });
 
         // Infrastructure
-        builder.Services.AddSingleton<HttpClient>();
+        builder.Services.AddSingleton(_ =>
+        {
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            };
+            var client = new HttpClient(handler);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("JIT-Calendar-Alert/1.0");
+            return client;
+        });
         builder.Services.AddSingleton<IcsParserService>();
         builder.Services.AddSingleton<CalendarSourceRepository>();
         builder.Services.AddSingleton<ProcessedMeetingCache>();
