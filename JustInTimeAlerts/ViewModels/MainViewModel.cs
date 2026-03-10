@@ -33,6 +33,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<CalendarSource> CalendarSources { get; } = new();
 
+    public ObservableCollection<UpcomingHourGroup> UpcomingEvents { get; } = new();
+
     public MainViewModel(CalendarSourceRepository repository, IcsParserService parser, DebugLogService debugLog)
     {
         _repository = repository;
@@ -40,7 +42,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _logger = debugLog;
         _logger.LogChanged += OnLogChanged;
         RefreshSources();
+        _ = InitialLoadAsync();
         _ = StartAutoSyncAsync(_autoSyncCts.Token);
+    }
+
+    private async Task InitialLoadAsync()
+    {
+        var allEvents = await FetchAllEventsAsync();
+        MainThread.BeginInvokeOnMainThread(() => UpdateUpcomingEvents(allEvents));
     }
 
     private async Task StartAutoSyncAsync(CancellationToken token)
@@ -62,20 +71,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task AutoSyncAsync(CancellationToken token)
     {
-        var total = 0;
         var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
-
-        foreach (var source in activeSources)
-        {
-            var events = await _parser.GetEventsAsync(source, token);
-            total += events.Count;
-            _repository.UpdateLastSync(source.Id);
-        }
+        var allEvents = await FetchAllEventsAsync(token);
 
         MainThread.BeginInvokeOnMainThread(() =>
         {
             RefreshSources();
-            StatusMessage = $"Auto-sync complete. {total} event(s) across {activeSources.Count} active calendar(s).";
+            UpdateUpcomingEvents(allEvents);
+            StatusMessage = $"Auto-sync complete. {allEvents.Count} event(s) across {activeSources.Count} active calendar(s).";
         });
     }
 
@@ -83,11 +86,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _autoSyncCts.Cancel();
         _autoSyncCts.Dispose();
+        _logger.LogChanged -= OnLogChanged;
     }
 
     private void OnLogChanged()
     {
-        // Must update the bound property on the UI thread.
         MainThread.BeginInvokeOnMainThread(() => DebugLog = _logger.AllLogs);
     }
 
@@ -96,6 +99,73 @@ public partial class MainViewModel : ObservableObject, IDisposable
         CalendarSources.Clear();
         foreach (var source in _repository.Sources)
             CalendarSources.Add(source);
+    }
+
+    // -------------------------------------------------------------------------
+    // Upcoming Events helpers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fetches all events from every active calendar source in one pass,
+    /// updating last-sync timestamps. Returns the combined list.
+    /// </summary>
+    private async Task<List<MeetingEvent>> FetchAllEventsAsync(CancellationToken token = default)
+    {
+        var allEvents = new List<MeetingEvent>();
+        foreach (var source in _repository.Sources.Where(s => s.IsActive))
+        {
+            var events = await _parser.GetEventsAsync(source, token);
+            _repository.UpdateLastSync(source.Id);
+            allEvents.AddRange(events);
+        }
+        return allEvents;
+    }
+
+    /// <summary>
+    /// Filters <paramref name="allEvents"/> to future-only events, groups them
+    /// by local calendar-hour slot, and replaces <see cref="UpcomingEvents"/>.
+    /// Must be called on the UI thread.
+    /// </summary>
+    private void UpdateUpcomingEvents(IEnumerable<MeetingEvent> allEvents)
+    {
+        var nowUtc   = DateTime.UtcNow;
+        var nowLocal = DateTime.Now;
+
+        var groups = allEvents
+            .Where(e => e.Start >= nowUtc)
+            .OrderBy(e => e.Start)
+            .GroupBy(e =>
+            {
+                var local = e.Start.ToLocalTime();
+                return new { local.Date, local.Hour };
+            })
+            .Select(g =>
+            {
+                var slotLocal = g.Key.Date.AddHours(g.Key.Hour);
+                return new UpcomingHourGroup
+                {
+                    HourLabel = FormatHourLabel(slotLocal, nowLocal),
+                    Events    = g.ToList(),
+                };
+            })
+            .ToList();
+
+        UpcomingEvents.Clear();
+        foreach (var group in groups)
+            UpcomingEvents.Add(group);
+    }
+
+    private static string FormatHourLabel(DateTime slotLocal, DateTime nowLocal)
+    {
+        string dayPart;
+        if (slotLocal.Date == nowLocal.Date)
+            dayPart = "Today";
+        else if (slotLocal.Date == nowLocal.Date.AddDays(1))
+            dayPart = "Tomorrow";
+        else
+            dayPart = slotLocal.ToString("ddd, MMM d");
+
+        return $"{dayPart}  \u00b7  {slotLocal:h:00 tt}";
     }
 
     [RelayCommand]
@@ -123,6 +193,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _repository.Add(source);
         IcsUrl = string.Empty;
         RefreshSources();
+        var allEvents = await FetchAllEventsAsync();
+        UpdateUpcomingEvents(allEvents);
         StatusMessage = $"Calendar added ({events.Count} events found).";
     }
 
@@ -155,6 +227,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             _repository.Add(source);
             RefreshSources();
+            var allEventsAfterImport = await FetchAllEventsAsync();
+            UpdateUpcomingEvents(allEventsAfterImport);
             StatusMessage = $"File imported ({events.Count} events found).";
         }
         catch (Exception ex)
@@ -169,18 +243,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _logger.Log("Manual sync triggered.");
         StatusMessage = "Syncing…";
-        var total = 0;
         var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
 
-        foreach (var source in activeSources)
-        {
-            var events = await _parser.GetEventsAsync(source);
-            total += events.Count;
-            _repository.UpdateLastSync(source.Id);
-        }
+        var allEvents = await FetchAllEventsAsync();
 
         RefreshSources();
-        StatusMessage = $"Sync complete. {total} event(s) loaded across {activeSources.Count} active calendar(s).";
+        UpdateUpcomingEvents(allEvents);
+        StatusMessage = $"Sync complete. {allEvents.Count} event(s) loaded across {activeSources.Count} active calendar(s).";
     }
 
     [RelayCommand]
@@ -189,20 +258,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _repository.Remove(id);
         RefreshSources();
         StatusMessage = "Calendar removed.";
-    }
-
-    [RelayCommand]
-    private async Task CopyLogsAsync()
-    {
-        await Clipboard.Default.SetTextAsync(_logger.AllLogs);
-        StatusMessage = "Debug log copied to clipboard.";
-    }
-
-    [RelayCommand]
-    private void ClearLogs()
-    {
-        _logger.Clear();
-        StatusMessage = "Debug log cleared.";
     }
 
     // -------------------------------------------------------------------------
@@ -317,6 +372,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _logger.Log($"ERROR importing backup: {ex.GetType().Name}: {ex.Message}");
             StatusMessage = $"Import failed: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task CopyLogsAsync()
+    {
+        await Clipboard.Default.SetTextAsync(_logger.AllLogs);
+        StatusMessage = "Debug log copied to clipboard.";
+    }
+
+    [RelayCommand]
+    private void ClearLogs()
+    {
+        _logger.Clear();
+        StatusMessage = "Debug log cleared.";
     }
 
     [RelayCommand]
