@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:JustInTimeAlerts.ViewModels"
+             x:Class="JustInTimeAlerts.Views.LogPage"
+             x:DataType="vm:LogViewModel"
+             Title="Debug Log">
+
+    <Grid RowDefinitions="Auto,*" Padding="16" RowSpacing="8">
+
+        <!-- Toolbar row -->
+        <Grid ColumnDefinitions="*,Auto,Auto">
+            <Label Text="&#x1F41E; Debug Log"
+                   FontSize="18"
+                   FontAttributes="Bold"
+                   VerticalOptions="Center" />
+            <Button Grid.Column="1"
+                    Text="Copy All"
+                    Command="{Binding CopyLogsCommand}"
+                    Padding="10,5"
+                    FontSize="12" />
+            <Button Grid.Column="2"
+                    Text="Clear"
+                    Command="{Binding ClearLogsCommand}"
+                    BackgroundColor="Transparent"
+                    TextColor="Red"
+                    Padding="10,5"
+                    FontSize="12" />
+        </Grid>
+
+        <!-- Log output -->
+        <Editor Grid.Row="1"
+                Text="{Binding DebugLog, Mode=OneWay}"
+                IsReadOnly="True"
+                FontSize="11"
+                FontFamily="OpenSansRegular"
+                BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1E1E1E}"
+                TextColor="{AppThemeBinding Light=#333333, Dark=#CCCCCC}" />
+
+    </Grid>
+</ContentPage>
