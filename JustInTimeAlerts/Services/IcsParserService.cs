@@ -1,5 +1,6 @@
 using Ical.Net;
 using Ical.Net.CalendarComponents;
+using Ical.Net.DataTypes;
 using JustInTimeAlerts.Models;
 
 namespace JustInTimeAlerts.Services;
@@ -111,7 +112,10 @@ public class IcsParserService
                 // For recurring events expand occurrences over the next 30 days.
                 if (e.RecurrenceRules?.Count > 0)
                 {
-                    var occurrences = e.GetOccurrences(DateTime.UtcNow, DateTime.UtcNow.AddDays(30));
+                    var rangeStart = new CalDateTime(DateTime.UtcNow);
+                    var rangeEnd   = new CalDateTime(DateTime.UtcNow.AddDays(30));
+                    var occurrences = e.GetOccurrences(rangeStart)
+                        .Where(occ => occ.Period.StartTime <= rangeEnd);
                     foreach (var occ in occurrences)
                     {
                         events.Add(new MeetingEvent
