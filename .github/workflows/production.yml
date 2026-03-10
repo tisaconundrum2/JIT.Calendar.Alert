@@ -1,0 +1,102 @@
+name: Production APK Build
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Production APK
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          DISPLAY_VERSION="${TAG#v}"
+          # Use a numeric build number derived from the version parts
+          BUILD_NUMBER=$(echo "$DISPLAY_VERSION" | awk -F. '{printf "%d%03d%03d", $1, $2, $3}')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "display_version=$DISPLAY_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Production version: $TAG (display: $DISPLAY_VERSION, build: $BUILD_NUMBER)"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui-android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: '17'
+
+      - name: Restore dependencies
+        run: dotnet restore JustInTimeAlerts/JustInTimeAlerts.csproj
+
+      - name: Decode keystore
+        id: decode_keystore
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > JustInTimeAlerts/keystore.jks
+          echo "keystore_available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed APK
+        if: steps.decode_keystore.outputs.keystore_available == 'true'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          dotnet publish JustInTimeAlerts/JustInTimeAlerts.csproj \
+            -f net9.0-android \
+            -c Release \
+            -p:ApplicationDisplayVersion=${{ steps.version.outputs.display_version }} \
+            -p:ApplicationVersion=${{ steps.version.outputs.build_number }} \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore=keystore.jks \
+            -p:AndroidSigningKeyAlias="$KEY_ALIAS" \
+            -p:AndroidSigningKeyPass="$KEY_PASSWORD" \
+            -p:AndroidSigningStorePass="$KEYSTORE_PASSWORD"
+
+      - name: Build unsigned APK
+        if: steps.decode_keystore.outputs.keystore_available != 'true'
+        run: |
+          dotnet publish JustInTimeAlerts/JustInTimeAlerts.csproj \
+            -f net9.0-android \
+            -c Release \
+            -p:ApplicationDisplayVersion=${{ steps.version.outputs.display_version }} \
+            -p:ApplicationVersion=${{ steps.version.outputs.build_number }}
+
+      - name: Find APK
+        id: find_apk
+        run: |
+          # Prefer signed APK, fall back to any APK
+          APK_PATH=$(find JustInTimeAlerts/bin/Release/net9.0-android -name "*-Signed.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find JustInTimeAlerts/bin/Release/net9.0-android -name "*.apk" | head -n 1)
+          fi
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK_PATH"
+
+      - name: Upload production APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-apk-${{ steps.version.outputs.tag }}
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          if-no-files-found: error
+          retention-days: 90
