@@ -19,6 +19,7 @@ public class AndroidNotificationService
 
     private readonly NotificationManager? _notificationManager;
     private int _nextId = 1;
+    private MediaPlayer? _alertPlayer;
 
     public AndroidNotificationService()
     {
@@ -60,19 +61,24 @@ public class AndroidNotificationService
 
         _notificationManager?.Notify(_nextId++, builder.Build());
 
-        PlayAlertSound();
+        PlayAlertSound(); // instance method — keeps player alive via _alertPlayer field
     }
 
     /// <summary>
     /// Plays <c>Time_Up.mp3</c> from the app's bundled assets using
-    /// <see cref="MediaPlayer"/>.  The player is released automatically on
+    /// <see cref="MediaPlayer"/>.  The player is held in a field so the GC
+    /// cannot collect it mid-playback, and is released automatically on
     /// completion.  Any failure is silently swallowed so it never blocks the
     /// notification path.
     /// </summary>
-    private static void PlayAlertSound()
+    private void PlayAlertSound()
     {
         try
         {
+            // Release any previously playing instance before starting a new one.
+            _alertPlayer?.Release();
+            _alertPlayer = null;
+
             var context = global::Android.App.Application.Context;
             var afd = context.Assets?.OpenFd("Time_Up.mp3");
             if (afd == null)
@@ -89,7 +95,13 @@ public class AndroidNotificationService
                     .Build()!);
 
             player.Prepare();
-            player.Completion += (_, _) => player.Release();
+            player.Completion += (_, _) =>
+            {
+                player.Release();
+                _alertPlayer = null;
+            };
+
+            _alertPlayer = player; // hold a strong reference so the GC can't collect mid-play
             player.Start();
         }
         catch (Exception)
