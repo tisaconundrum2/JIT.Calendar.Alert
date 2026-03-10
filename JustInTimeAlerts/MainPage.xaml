@@ -170,8 +170,7 @@
                             IsReadOnly="True"
                             FontSize="11"
                             FontFamily="OpenSansRegular"
-                            AutoSize="TextChanges"
-                            MinimumHeightRequest="120"
+                            HeightRequest="200"
                             BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1E1E1E}"
                             TextColor="{AppThemeBinding Light=#333333, Dark=#CCCCCC}" />
                 </VerticalStackLayout>
