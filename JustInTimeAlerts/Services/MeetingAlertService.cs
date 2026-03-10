@@ -12,6 +12,7 @@ public class MeetingAlertService
     private readonly IcsParserService _parser;
     private readonly CalendarSourceRepository _repository;
     private readonly ProcessedMeetingCache _cache;
+    private readonly DebugLogService _log;
 
     /// <summary>
     /// The "just-in-time" window: a meeting is considered starting "right now"
@@ -24,11 +25,13 @@ public class MeetingAlertService
     public MeetingAlertService(
         IcsParserService parser,
         CalendarSourceRepository repository,
-        ProcessedMeetingCache cache)
+        ProcessedMeetingCache cache,
+        DebugLogService log)
     {
         _parser = parser;
         _repository = repository;
         _cache = cache;
+        _log = log;
     }
 
     /// <summary>
@@ -44,6 +47,7 @@ public class MeetingAlertService
         _cache.Evict();
 
         var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
+        _log.Log($"CheckAndAlert: {activeSources.Count} active source(s). Window: {windowStart:HH:mm:ss} – {now:HH:mm:ss} UTC");
 
         foreach (var source in activeSources)
         {
@@ -57,8 +61,13 @@ public class MeetingAlertService
                 {
                     if (_cache.ShouldAlert(meeting.Uid))
                     {
+                        _log.Log($"ALERT: \"{meeting.Title}\" at {meeting.Start:HH:mm} UTC");
                         _cache.MarkAlerted(meeting.Uid, meeting.End);
                         MeetingStarting?.Invoke(this, meeting);
+                    }
+                    else
+                    {
+                        _log.Log($"Skipped (already alerted): \"{meeting.Title}\"");
                     }
                 }
             }

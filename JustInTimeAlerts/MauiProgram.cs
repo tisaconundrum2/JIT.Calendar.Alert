@@ -29,6 +29,7 @@ public static class MauiProgram
             client.DefaultRequestHeaders.UserAgent.ParseAdd("JIT-Calendar-Alert/1.0");
             return client;
         });
+        builder.Services.AddSingleton<DebugLogService>();
         builder.Services.AddSingleton<IcsParserService>();
         builder.Services.AddSingleton<CalendarSourceRepository>();
         builder.Services.AddSingleton<ProcessedMeetingCache>();

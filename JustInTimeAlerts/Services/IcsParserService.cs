@@ -11,10 +11,12 @@ namespace JustInTimeAlerts.Services;
 public class IcsParserService
 {
     private readonly HttpClient _httpClient;
+    private readonly DebugLogService _log;
 
-    public IcsParserService(HttpClient httpClient)
+    public IcsParserService(HttpClient httpClient, DebugLogService log)
     {
         _httpClient = httpClient;
+        _log = log;
     }
 
     /// <summary>
@@ -30,23 +32,31 @@ public class IcsParserService
         {
             if (!string.IsNullOrWhiteSpace(source.Url))
             {
+                _log.Log($"Fetching ICS from URL: {source.Url}");
                 icsContent = await _httpClient.GetStringAsync(source.Url, cancellationToken);
+                _log.Log($"Fetched {icsContent.Length} chars from URL.");
             }
             else if (!string.IsNullOrWhiteSpace(source.FilePath) && File.Exists(source.FilePath))
             {
+                _log.Log($"Reading ICS file: {source.FilePath}");
                 icsContent = await File.ReadAllTextAsync(source.FilePath, cancellationToken);
+                _log.Log($"Read {icsContent.Length} chars from file.");
             }
             else
             {
+                _log.Log("ICS source has no URL or valid file path — skipping.");
                 return Array.Empty<MeetingEvent>();
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _log.Log($"ERROR fetching ICS: {ex.GetType().Name}: {ex.Message}");
             return Array.Empty<MeetingEvent>();
         }
 
-        return ParseIcsContent(icsContent, source.Id);
+        var result = ParseIcsContent(icsContent, source.Id);
+        _log.Log($"Parsed {result.Count} event(s) from source.");
+        return result;
     }
 
     /// <summary>Parses raw ICS text and returns a list of <see cref="MeetingEvent"/>.</summary>
@@ -104,8 +114,9 @@ public class IcsParserService
 
             return events;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _log.Log($"ERROR parsing ICS content: {ex.GetType().Name}: {ex.Message}");
             return Array.Empty<MeetingEvent>();
         }
     }

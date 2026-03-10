@@ -126,6 +126,37 @@
                 </VerticalStackLayout>
             </Frame>
 
+            <!-- Debug Log -->
+            <Frame Style="{StaticResource CardFrame}">
+                <VerticalStackLayout Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto,Auto">
+                        <Label Text="&#x1F41E; Debug Log"
+                               FontAttributes="Bold"
+                               VerticalOptions="Center" />
+                        <Button Grid.Column="1"
+                                Text="Copy All"
+                                Command="{Binding CopyLogsCommand}"
+                                Padding="10,5"
+                                FontSize="12" />
+                        <Button Grid.Column="2"
+                                Text="Clear"
+                                Command="{Binding ClearLogsCommand}"
+                                BackgroundColor="Transparent"
+                                TextColor="Red"
+                                Padding="10,5"
+                                FontSize="12" />
+                    </Grid>
+                    <Editor Text="{Binding DebugLog, Mode=OneWay}"
+                            IsReadOnly="True"
+                            FontSize="11"
+                            FontFamily="OpenSansRegular"
+                            AutoSize="TextChanges"
+                            MinimumHeightRequest="120"
+                            BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1E1E1E}"
+                            TextColor="{AppThemeBinding Light=#333333, Dark=#CCCCCC}" />
+                </VerticalStackLayout>
+            </Frame>
+
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>

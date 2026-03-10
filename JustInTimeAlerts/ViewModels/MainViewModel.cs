@@ -14,6 +14,7 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly CalendarSourceRepository _repository;
     private readonly IcsParserService _parser;
+    private readonly DebugLogService _logger;
 
     [ObservableProperty]
     private string _icsUrl = string.Empty;
@@ -24,13 +25,24 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private bool _isServiceRunning;
 
+    [ObservableProperty]
+    private string _debugLog = "(no log entries yet)";
+
     public ObservableCollection<CalendarSource> CalendarSources { get; } = new();
 
-    public MainViewModel(CalendarSourceRepository repository, IcsParserService parser)
+    public MainViewModel(CalendarSourceRepository repository, IcsParserService parser, DebugLogService debugLog)
     {
         _repository = repository;
         _parser = parser;
+        _logger = debugLog;
+        _logger.LogChanged += OnLogChanged;
         RefreshSources();
+    }
+
+    private void OnLogChanged()
+    {
+        // Must update the bound property on the UI thread.
+        MainThread.BeginInvokeOnMainThread(() => DebugLog = _logger.AllLogs);
     }
 
     private void RefreshSources()
@@ -49,6 +61,7 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        _logger.Log($"Adding calendar URL: {IcsUrl.Trim()}");
         StatusMessage = "Validating URL…";
         var source = new CalendarSource { Url = IcsUrl.Trim() };
 
@@ -56,6 +69,7 @@ public partial class MainViewModel : ObservableObject
         var events = await _parser.GetEventsAsync(source);
         if (events.Count == 0)
         {
+            _logger.Log("Validation failed: 0 events returned.");
             StatusMessage = "Could not load any events from that URL. Please check the address.";
             return;
         }
@@ -99,6 +113,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _logger.Log($"ERROR importing file: {ex.GetType().Name}: {ex.Message}");
             StatusMessage = $"Error importing file: {ex.Message}";
         }
     }
@@ -106,6 +121,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task SyncNowAsync()
     {
+        _logger.Log("Manual sync triggered.");
         StatusMessage = "Syncing…";
         var total = 0;
         var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
@@ -127,6 +143,20 @@ public partial class MainViewModel : ObservableObject
         _repository.Remove(id);
         RefreshSources();
         StatusMessage = "Calendar removed.";
+    }
+
+    [RelayCommand]
+    private async Task CopyLogsAsync()
+    {
+        await Clipboard.Default.SetTextAsync(_logger.AllLogs);
+        StatusMessage = "Debug log copied to clipboard.";
+    }
+
+    [RelayCommand]
+    private void ClearLogs()
+    {
+        _logger.Clear();
+        StatusMessage = "Debug log cleared.";
     }
 
     [RelayCommand]
