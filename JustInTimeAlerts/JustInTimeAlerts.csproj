@@ -45,6 +45,7 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.0" />
 		<PackageReference Include="Ical.Net" Version="5.2.1" />
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+		<PackageReference Include="Xamarin.AndroidX.Work.Runtime" Version="2.10.0.5" Condition="$(TargetFramework.StartsWith('net9.0-android'))" />
 	</ItemGroup>
 
 </Project>
