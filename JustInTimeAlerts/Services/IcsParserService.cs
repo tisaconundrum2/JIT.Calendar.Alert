@@ -59,6 +59,56 @@ public class IcsParserService
         return result;
     }
 
+    /// <summary>
+    /// Removes invalid combinations from RRULE lines where both COUNT and UNTIL are present.
+    /// RFC 5545 §3.3.10 forbids supplying both; real-world feeds (Outlook, Google) do it anyway.
+    /// We keep UNTIL and drop COUNT, since UNTIL is more precise.
+    /// </summary>
+    private static string SanitizeIcsContent(string icsContent)
+    {
+        // Lines in iCal can be folded (continued with a leading space/tab), but RRULE values are
+        // nearly always on a single logical line. Process logical lines to be safe.
+        var sb = new System.Text.StringBuilder(icsContent.Length);
+        var lines = icsContent.Split('\n');
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+
+            // Check for a RRULE property (may have parameters, e.g. RRULE;X-FOO=bar:FREQ=...)
+            // A property line looks like: RRULE[;params]:value
+            var colonIdx = line.IndexOf(':');
+            if (colonIdx > 0)
+            {
+                var propName = line[..colonIdx].Split(';')[0].Trim().ToUpperInvariant();
+                if (propName == "RRULE")
+                {
+                    var value = line[(colonIdx + 1)..];
+                    // Remove COUNT=nnn if UNTIL= is also present
+                    if (value.Contains("COUNT=", StringComparison.OrdinalIgnoreCase)
+                        && value.Contains("UNTIL=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Strip ;COUNT=<digits> or COUNT=<digits>; or COUNT=<digits> at end
+                        value = System.Text.RegularExpressions.Regex.Replace(
+                            value,
+                            @";?COUNT=\d+;?",
+                            m =>
+                            {
+                                // Preserve a single semicolon if we consumed one on each side
+                                var s = m.Value;
+                                return s.StartsWith(';') && s.EndsWith(';') ? ";" : "";
+                            },
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                        line = line[..(colonIdx + 1)] + value;
+                    }
+                }
+            }
+
+            sb.Append(line).Append('\n');
+        }
+        return sb.ToString();
+    }
+
     /// <summary>Parses raw ICS text and returns a list of <see cref="MeetingEvent"/>.</summary>
     public IReadOnlyList<MeetingEvent> ParseIcsContent(string icsContent, Guid calendarSourceId)
     {
@@ -67,6 +117,7 @@ public class IcsParserService
 
         try
         {
+            icsContent = SanitizeIcsContent(icsContent);
             var calendar = Calendar.Load(icsContent);
             var events = new List<MeetingEvent>();
 
