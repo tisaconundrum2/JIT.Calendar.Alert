@@ -42,6 +42,8 @@ public static class MauiProgram
         // UI
         builder.Services.AddTransient<MainViewModel>();
         builder.Services.AddTransient<MainPage>();
+        builder.Services.AddTransient<JustInTimeAlerts.ViewModels.LogViewModel>();
+        builder.Services.AddTransient<JustInTimeAlerts.Views.LogPage>();
 
 #if DEBUG
         builder.Logging.AddDebug();
