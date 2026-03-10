@@ -10,11 +10,14 @@ namespace JustInTimeAlerts.ViewModels;
 /// ViewModel for the main page.  Uses CommunityToolkit.Mvvm source generators
 /// for commands and observable properties.
 /// </summary>
-public partial class MainViewModel : ObservableObject
+public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly CalendarSourceRepository _repository;
     private readonly IcsParserService _parser;
     private readonly DebugLogService _logger;
+    private readonly CancellationTokenSource _autoSyncCts = new();
+
+    private static readonly TimeSpan AutoSyncInterval = TimeSpan.FromMinutes(5);
 
     [ObservableProperty]
     private string _icsUrl = string.Empty;
@@ -37,6 +40,49 @@ public partial class MainViewModel : ObservableObject
         _logger = debugLog;
         _logger.LogChanged += OnLogChanged;
         RefreshSources();
+        _ = StartAutoSyncAsync(_autoSyncCts.Token);
+    }
+
+    private async Task StartAutoSyncAsync(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(AutoSyncInterval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+            {
+                _logger.Log("Auto-sync triggered (5-minute interval).");
+                await AutoSyncAsync(token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on disposal.
+        }
+    }
+
+    private async Task AutoSyncAsync(CancellationToken token)
+    {
+        var total = 0;
+        var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
+
+        foreach (var source in activeSources)
+        {
+            var events = await _parser.GetEventsAsync(source, token);
+            total += events.Count;
+            _repository.UpdateLastSync(source.Id);
+        }
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            RefreshSources();
+            StatusMessage = $"Auto-sync complete. {total} event(s) across {activeSources.Count} active calendar(s).";
+        });
+    }
+
+    public void Dispose()
+    {
+        _autoSyncCts.Cancel();
+        _autoSyncCts.Dispose();
     }
 
     private void OnLogChanged()
