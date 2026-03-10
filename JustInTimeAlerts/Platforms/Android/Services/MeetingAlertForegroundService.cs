@@ -9,7 +9,7 @@ namespace JustInTimeAlerts.Platforms.Android.Services;
 
 /// <summary>
 /// Android Foreground Service that keeps the app alive in the background.
-/// A <see cref="PeriodicTimer"/> fires every 60 seconds to run the
+/// A <see cref="PeriodicTimer"/> fires every 10 seconds to run the
 /// <see cref="MeetingAlertService"/> logic engine.
 /// </summary>
 [Service(ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeDataSync)]
@@ -60,9 +60,9 @@ public class MeetingAlertForegroundService : Service
 
         alertService.MeetingStarting += (_, meeting) => notificationService.Notify(meeting);
 
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
 
-        // Run immediately on first tick, then every minute.
+        // Run immediately on first tick, then every 10 seconds.
         await alertService.CheckAndAlertAsync(token).ConfigureAwait(false);
 
         try
