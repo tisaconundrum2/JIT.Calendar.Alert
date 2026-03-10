@@ -58,8 +58,7 @@
                                            FontSize="11"
                                            FontAttributes="Bold"
                                            TextColor="{AppThemeBinding Light=#0078D4, Dark=#66B3FF}"
-                                           TextTransform="Uppercase"
-                                           LetterSpacing="0.5" />
+                                           TextTransform="Uppercase" />
 
                                     <!-- Event(s) for this hour -->
                                     <Label Text="{Binding Summary}"
