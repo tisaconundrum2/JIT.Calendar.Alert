@@ -8,6 +8,8 @@
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 	<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+	<!-- Needed to write to public Downloads on API 26–28; not required on API 29+. -->
+	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 	<!-- Required by WorkManager to hold a WakeLock during worker execution. -->
 	<uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>

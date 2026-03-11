@@ -289,20 +289,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var json = System.Text.Json.JsonSerializer.Serialize(urlSources,
                 new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
 
-            // Write to a temporary file in the app cache directory, then share.
             var fileName = $"jit-calendar-backup-{DateTime.Now:yyyyMMdd-HHmmss}.json";
-            var filePath = Path.Combine(FileSystem.CacheDirectory, fileName);
-            await File.WriteAllTextAsync(filePath, json);
 
-            _logger.Log($"Backup exported: {fileName} ({urlSources.Count} URL(s)).");
-
-            await Share.Default.RequestAsync(new ShareFileRequest
+#if ANDROID
+            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.Q)
             {
-                Title = "Save JIT Calendar Backup",
-                File = new ShareFile(filePath, "application/json"),
-            });
+                // API 29+ – insert into the MediaStore Downloads collection.
+                // No storage permission required.
+                var values = new Android.Content.ContentValues();
+                values.Put(Android.Provider.MediaStore.IMediaColumns.DisplayName, fileName);
+                values.Put(Android.Provider.MediaStore.IMediaColumns.MimeType, "application/json");
+                values.Put(Android.Provider.MediaStore.IMediaColumns.RelativePath,
+                    Android.OS.Environment.DirectoryDownloads);
 
-            StatusMessage = $"Backup exported ({urlSources.Count} calendar URL(s)).";
+                var resolver = Android.App.Application.Context.ContentResolver!;
+                var uri = resolver.Insert(
+                    Android.Provider.MediaStore.Downloads.ExternalContentUri!, values);
+
+                if (uri == null)
+                    throw new IOException("MediaStore returned a null URI – could not create file.");
+
+                using var outStream = resolver.OpenOutputStream(uri)
+                    ?? throw new IOException("Could not open output stream for MediaStore URI.");
+                using var writer = new System.IO.StreamWriter(outStream);
+                await writer.WriteAsync(json);
+            }
+            else
+            {
+                // API 26–28 – write directly to the public Downloads directory.
+                // Requires WRITE_EXTERNAL_STORAGE permission (declared in AndroidManifest).
+                var downloadsDir =
+                    Android.OS.Environment.GetExternalStoragePublicDirectory(
+                        Android.OS.Environment.DirectoryDownloads)!.AbsolutePath;
+                var filePath = Path.Combine(downloadsDir, fileName);
+                await File.WriteAllTextAsync(filePath, json);
+            }
+#endif
+
+            _logger.Log($"Backup exported to Downloads: {fileName} ({urlSources.Count} URL(s)).");
+            StatusMessage = $"Backup saved to Downloads/{fileName} ({urlSources.Count} calendar URL(s)).";
         }
         catch (Exception ex)
         {
