@@ -131,8 +131,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var nowUtc   = DateTime.UtcNow;
         var nowLocal = DateTime.Now;
 
+        var todayLocal = nowLocal.Date;
+
         var groups = allEvents
-            .Where(e => e.Start >= nowUtc)
+            .Where(e => e.Start >= nowUtc && e.Start.ToLocalTime().Date == todayLocal)
             .OrderBy(e => e.Start)
             .GroupBy(e =>
             {
