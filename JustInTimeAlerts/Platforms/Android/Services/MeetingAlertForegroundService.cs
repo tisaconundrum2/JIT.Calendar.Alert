@@ -60,9 +60,12 @@ public class MeetingAlertForegroundService : Service
 
         alertService.MeetingStarting += (_, meeting) => notificationService.Notify(meeting);
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        // Poll every 60 seconds — matches the 1-minute AlertWindow and avoids
+        // hammering the network. ICS re-fetches are further rate-limited inside
+        // IcsParserService (min 15-minute interval + ETag/If-Modified-Since).
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
 
-        // Run immediately on first tick, then every 10 seconds.
+        // Run immediately on first tick, then every 60 seconds.
         await alertService.CheckAndAlertAsync(token).ConfigureAwait(false);
 
         try

@@ -25,7 +25,12 @@ public static class MauiProgram
             {
                 AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
             };
-            var client = new HttpClient(handler);
+            var client = new HttpClient(handler)
+            {
+                // Hard cap per request — prevents a hung server from pinning the
+                // background thread indefinitely and blocking the next sync cycle.
+                Timeout = TimeSpan.FromSeconds(30),
+            };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("JIT-Calendar-Alert/1.0");
             return client;
         });

@@ -1,3 +1,7 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using Ical.Net;
 using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
@@ -9,9 +13,58 @@ namespace JustInTimeAlerts.Services;
 /// Fetches and parses ICS calendars from a URL or a local file path,
 /// returning strongly-typed <see cref="MeetingEvent"/> objects.
 /// </summary>
+/// <remarks>
+/// Network-efficiency strategy (prevents tight-loop DOS behaviour):
+/// <list type="bullet">
+///   <item>URLs are re-fetched at most once every <see cref="MinFetchInterval"/> (15 min).</item>
+///   <item>Every URL request sends <c>If-None-Match</c> / <c>If-Modified-Since</c> headers.
+///         A <c>304 Not Modified</c> response returns the in-memory cache instantly.</item>
+///   <item>Even on a 200 response the ICS is only re-parsed when the SHA-256
+///         content hash differs from the previously cached value.</item>
+///   <item>Consecutive fetch failures trigger exponential back-off (1 min → 5 min → 15 min)
+///         so a broken feed never produces an infinite retry loop.</item>
+/// </list>
+/// </remarks>
 public class IcsParserService
 {
-    private readonly HttpClient _httpClient;
+    // -----------------------------------------------------------------------
+    // Constants
+    // -----------------------------------------------------------------------
+
+    /// <summary>Minimum time between actual HTTP fetches for the same URL.</summary>
+    public static readonly TimeSpan MinFetchInterval = TimeSpan.FromMinutes(15);
+
+    private static readonly TimeSpan[] BackoffSteps =
+    [
+        TimeSpan.FromMinutes(1),
+        TimeSpan.FromMinutes(5),
+        TimeSpan.FromMinutes(15),
+    ];
+
+    // -----------------------------------------------------------------------
+    // Per-source in-memory cache
+    // -----------------------------------------------------------------------
+
+    private sealed class SourceCache
+    {
+        public string?                    ETag              { get; set; }
+        public string?                    LastModified       { get; set; }
+        public string?                    ContentHash        { get; set; }
+        public IReadOnlyList<MeetingEvent> Events            { get; set; } = Array.Empty<MeetingEvent>();
+        public DateTime                   LastFetchTime      { get; set; } = DateTime.MinValue;
+        public int                        ConsecutiveFailures { get; set; }
+        public DateTime                   BackoffUntil       { get; set; } = DateTime.MinValue;
+
+        // For local files: track the last write time so we only re-parse on change.
+        public DateTime                   FileLastWrite      { get; set; } = DateTime.MinValue;
+    }
+
+    private readonly Dictionary<string, SourceCache> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _cacheLock = new();
+
+    // -----------------------------------------------------------------------
+
+    private readonly HttpClient  _httpClient;
     private readonly DebugLogService _log;
 
     public IcsParserService(HttpClient httpClient, DebugLogService log)
@@ -20,44 +73,221 @@ public class IcsParserService
         _log = log;
     }
 
+    // -----------------------------------------------------------------------
+    // Public API
+    // -----------------------------------------------------------------------
+
     /// <summary>
     /// Loads events from the given <paramref name="source"/>.
-    /// Returns an empty list on failure so callers can handle errors gracefully.
+    /// Returns cached events when no network fetch is needed.
+    /// Returns an empty list on unrecoverable failure so callers stay clean.
     /// </summary>
     public async Task<IReadOnlyList<MeetingEvent>> GetEventsAsync(
         CalendarSource source,
         CancellationToken cancellationToken = default)
     {
-        string icsContent;
+        if (!string.IsNullOrWhiteSpace(source.Url))
+            return await FetchFromUrlAsync(source, cancellationToken).ConfigureAwait(false);
+
+        if (!string.IsNullOrWhiteSpace(source.FilePath) && File.Exists(source.FilePath))
+            return await ReadFromFileAsync(source, cancellationToken).ConfigureAwait(false);
+
+        _log.Log("ICS source has no URL or valid file path — skipping.");
+        return Array.Empty<MeetingEvent>();
+    }
+
+    // -----------------------------------------------------------------------
+    // URL path
+    // -----------------------------------------------------------------------
+
+    private async Task<IReadOnlyList<MeetingEvent>> FetchFromUrlAsync(
+        CalendarSource source,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = source.Url!;
+        SourceCache entry;
+        lock (_cacheLock)
+        {
+            if (!_cache.TryGetValue(cacheKey, out entry!))
+            {
+                entry = new SourceCache();
+                _cache[cacheKey] = entry;
+            }
+        }
+
+        var now = DateTime.UtcNow;
+
+        // ── Back-off guard ──────────────────────────────────────────────────
+        if (now < entry.BackoffUntil)
+        {
+            _log.Log($"ICS [{source.DisplayName}]: in back-off until {entry.BackoffUntil:HH:mm:ss} UTC — returning cache.");
+            return entry.Events;
+        }
+
+        // ── Minimum re-fetch interval ───────────────────────────────────────
+        if (entry.Events.Count > 0 && (now - entry.LastFetchTime) < MinFetchInterval)
+        {
+            _log.Log($"ICS [{source.DisplayName}]: cache fresh (last fetch {(now - entry.LastFetchTime).TotalMinutes:F1} min ago) — skipping HTTP.");
+            return entry.Events;
+        }
+
+        // ── Build conditional request ───────────────────────────────────────
+        using var request = new HttpRequestMessage(HttpMethod.Get, source.Url);
+
+        if (!string.IsNullOrEmpty(entry.ETag))
+            request.Headers.IfNoneMatch.Add(new EntityTagHeaderValue(entry.ETag, isWeak: true));
+        else if (!string.IsNullOrEmpty(entry.LastModified) &&
+                 DateTimeOffset.TryParse(entry.LastModified, out var lmParsed))
+            request.Headers.IfModifiedSince = lmParsed;
+
+        HttpResponseMessage response;
         try
         {
-            if (!string.IsNullOrWhiteSpace(source.Url))
-            {
-                _log.Log($"Fetching ICS from URL: {source.Url}");
-                icsContent = await _httpClient.GetStringAsync(source.Url, cancellationToken);
-                _log.Log($"Fetched {icsContent.Length} chars from URL.");
-            }
-            else if (!string.IsNullOrWhiteSpace(source.FilePath) && File.Exists(source.FilePath))
-            {
-                _log.Log($"Reading ICS file: {source.FilePath}");
-                icsContent = await File.ReadAllTextAsync(source.FilePath, cancellationToken);
-                _log.Log($"Read {icsContent.Length} chars from file.");
-            }
-            else
-            {
-                _log.Log("ICS source has no URL or valid file path — skipping.");
-                return Array.Empty<MeetingEvent>();
-            }
+            _log.Log($"ICS [{source.DisplayName}]: HTTP GET (ETag: {entry.ETag ?? "none"})");
+            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _log.Log($"ERROR fetching ICS: {ex.GetType().Name}: {ex.Message}");
-            return Array.Empty<MeetingEvent>();
+            return HandleFetchFailure(entry, source.DisplayName, ex);
         }
 
-        var result = ParseIcsContent(icsContent, source.Id);
-        _log.Log($"Parsed {result.Count} event(s) from source.");
-        return result;
+        using (response)
+        {
+            // ── 304 Not Modified ────────────────────────────────────────────
+            if (response.StatusCode == HttpStatusCode.NotModified)
+            {
+                entry.ConsecutiveFailures = 0;
+                entry.LastFetchTime = now;
+                _log.Log($"ICS [{source.DisplayName}]: 304 Not Modified — using {entry.Events.Count} cached event(s).");
+                return entry.Events;
+            }
+
+            // ── Non-success ─────────────────────────────────────────────────
+            if (!response.IsSuccessStatusCode)
+            {
+                return HandleFetchFailure(entry, source.DisplayName,
+                    new HttpRequestException($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}"));
+            }
+
+            // ── Read body ───────────────────────────────────────────────────
+            string icsContent;
+            try
+            {
+                icsContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return HandleFetchFailure(entry, source.DisplayName, ex);
+            }
+
+            // ── Content-hash dedup (skip re-parse if identical) ─────────────
+            var hash = ComputeHash(icsContent);
+            if (hash == entry.ContentHash)
+            {
+                entry.ConsecutiveFailures = 0;
+                entry.LastFetchTime = now;
+                // Refresh cache-control metadata in case ETag changed.
+                CaptureResponseHeaders(response, entry);
+                _log.Log($"ICS [{source.DisplayName}]: 200 but content unchanged — using {entry.Events.Count} cached event(s).");
+                return entry.Events;
+            }
+
+            // ── Parse new content ───────────────────────────────────────────
+            _log.Log($"ICS [{source.DisplayName}]: new content ({icsContent.Length} chars) — parsing.");
+            var parsed = ParseIcsContent(icsContent, source.Id);
+            _log.Log($"ICS [{source.DisplayName}]: parsed {parsed.Count} event(s).");
+
+            entry.ContentHash          = hash;
+            entry.Events               = parsed;
+            entry.LastFetchTime        = now;
+            entry.ConsecutiveFailures  = 0;
+            entry.BackoffUntil         = DateTime.MinValue;
+            CaptureResponseHeaders(response, entry);
+
+            return parsed;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // File path
+    // -----------------------------------------------------------------------
+
+    private async Task<IReadOnlyList<MeetingEvent>> ReadFromFileAsync(
+        CalendarSource source,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = source.FilePath!;
+        SourceCache entry;
+        lock (_cacheLock)
+        {
+            if (!_cache.TryGetValue(cacheKey, out entry!))
+            {
+                entry = new SourceCache();
+                _cache[cacheKey] = entry;
+            }
+        }
+
+        var lastWrite = File.GetLastWriteTimeUtc(source.FilePath!);
+        if (entry.Events.Count > 0 && lastWrite == entry.FileLastWrite)
+        {
+            _log.Log($"ICS [{source.DisplayName}]: file unchanged — using {entry.Events.Count} cached event(s).");
+            return entry.Events;
+        }
+
+        string icsContent;
+        try
+        {
+            _log.Log($"ICS [{source.DisplayName}]: reading file.");
+            icsContent = await File.ReadAllTextAsync(source.FilePath!, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.Log($"ERROR reading ICS file: {ex.GetType().Name}: {ex.Message}");
+            return entry.Events; // return stale cache rather than empty
+        }
+
+        var parsed = ParseIcsContent(icsContent, source.Id);
+        _log.Log($"ICS [{source.DisplayName}]: parsed {parsed.Count} event(s) from file.");
+
+        entry.Events        = parsed;
+        entry.FileLastWrite = lastWrite;
+        entry.ContentHash   = ComputeHash(icsContent);
+
+        return parsed;
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    private IReadOnlyList<MeetingEvent> HandleFetchFailure(
+        SourceCache entry, string displayName, Exception ex)
+    {
+        entry.ConsecutiveFailures++;
+        var stepIdx    = Math.Min(entry.ConsecutiveFailures - 1, BackoffSteps.Length - 1);
+        var backoff    = BackoffSteps[stepIdx];
+        entry.BackoffUntil = DateTime.UtcNow + backoff;
+
+        _log.Log($"ERROR fetching ICS [{displayName}] (failure #{entry.ConsecutiveFailures}): " +
+                 $"{ex.GetType().Name}: {ex.Message}. " +
+                 $"Back-off for {backoff.TotalMinutes:F0} min.");
+
+        return entry.Events; // return stale cache rather than empty
+    }
+
+    private static void CaptureResponseHeaders(HttpResponseMessage response, SourceCache entry)
+    {
+        if (response.Headers.ETag != null)
+            entry.ETag = response.Headers.ETag.Tag;
+
+        if (response.Content.Headers.LastModified.HasValue)
+            entry.LastModified = response.Content.Headers.LastModified.Value.ToString("R");
+    }
+
+    private static string ComputeHash(string content)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+        return Convert.ToHexString(bytes);
     }
 
     /// <summary>
