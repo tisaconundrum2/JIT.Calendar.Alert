@@ -26,10 +26,6 @@ public partial class App : Application
             e.SetObserved(); // prevent the process from being torn down on .NET 6+
         };
 
-        // MAUI's own cross-platform unhandled-exception surface.
-        UnhandledException += (_, e) =>
-            _log.LogException("Application.UnhandledException", e.ExceptionObject);
-
         InitializeComponent();
     }
 
