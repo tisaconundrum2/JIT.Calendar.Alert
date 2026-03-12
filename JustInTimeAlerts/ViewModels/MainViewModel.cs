@@ -26,10 +26,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
-    private bool _isServiceRunning;
+    private string _debugLog = "(no log entries yet)";
 
     [ObservableProperty]
-    private string _debugLog = "(no log entries yet)";
+    private bool _isRefreshing;
 
     public ObservableCollection<CalendarSource> CalendarSources { get; } = new();
 
@@ -245,13 +245,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _logger.Log("Manual sync triggered.");
         StatusMessage = "Syncing…";
-        var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
-
-        var allEvents = await FetchAllEventsAsync();
-
-        RefreshSources();
-        UpdateUpcomingEvents(allEvents);
-        StatusMessage = $"Sync complete. {allEvents.Count} event(s) loaded across {activeSources.Count} active calendar(s).";
+        IsRefreshing = true;
+        try
+        {
+            var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
+            var allEvents = await FetchAllEventsAsync();
+            RefreshSources();
+            UpdateUpcomingEvents(allEvents);
+            StatusMessage = $"Sync complete. {allEvents.Count} event(s) loaded across {activeSources.Count} active calendar(s).";
+        }
+        finally
+        {
+            IsRefreshing = false;
+        }
     }
 
     [RelayCommand]
@@ -415,31 +421,4 @@ public partial class MainViewModel : ObservableObject, IDisposable
         StatusMessage = "Debug log cleared.";
     }
 
-    [RelayCommand]
-    private void ToggleService()
-    {
-#if ANDROID
-        var context = global::Android.App.Application.Context;
-        var intent = new global::Android.Content.Intent(
-            context,
-            typeof(Platforms.Android.Services.MeetingAlertForegroundService));
-
-        if (IsServiceRunning)
-        {
-            intent.SetAction(Platforms.Android.Services.MeetingAlertForegroundService.ActionStop);
-            context.StartService(intent);
-            IsServiceRunning = false;
-            StatusMessage = "Background monitoring stopped.";
-        }
-        else
-        {
-            intent.SetAction(Platforms.Android.Services.MeetingAlertForegroundService.ActionStart);
-            context.StartForegroundService(intent);
-            IsServiceRunning = true;
-            StatusMessage = "Background monitoring started.";
-        }
-#else
-        StatusMessage = "Background service is only supported on Android.";
-#endif
-    }
 }
