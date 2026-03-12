@@ -29,7 +29,22 @@ public class MainActivity : MauiAppCompatActivity
                 requestCode: 1001);
         }
 
+        // Start the foreground service immediately on every launch so alert
+        // monitoring begins right away without needing a device reboot.
+        // StartForegroundService is idempotent — calling it when the service
+        // is already running simply delivers a new Intent and returns.
+        StartForegroundAlertService();
         ScheduleCalendarSync();
+    }
+
+    /// <summary>
+    /// Launches (or re-delivers to) the <see cref="MeetingAlertForegroundService"/>.
+    /// </summary>
+    private void StartForegroundAlertService()
+    {
+        var serviceIntent = new Intent(this, typeof(MeetingAlertForegroundService));
+        serviceIntent.SetAction(MeetingAlertForegroundService.ActionStart);
+        StartForegroundService(serviceIntent);
     }
 
     /// <summary>
