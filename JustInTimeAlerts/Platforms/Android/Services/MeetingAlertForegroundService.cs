@@ -2,6 +2,7 @@
 using Android.App;
 using Android.Content;
 using Android.OS;
+using Android.Runtime;
 using JustInTimeAlerts.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,7 +14,8 @@ namespace JustInTimeAlerts.Platforms.Android.Services;
 /// <see cref="MeetingAlertService"/> logic engine.
 /// </summary>
 [Service(ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeDataSync,
-         StopWithTask = false)]          // keeps running when the user swipes the app away
+         Exported = false)]
+[Register("com.justintimealerts.MeetingAlertForegroundService")]
 public class MeetingAlertForegroundService : Service
 {
     public const int ForegroundNotificationId = 1001;
