@@ -13,6 +13,7 @@ public class MeetingAlertService
     private readonly CalendarSourceRepository _repository;
     private readonly ProcessedMeetingCache _cache;
     private readonly DebugLogService _log;
+    private readonly SemaphoreSlim _checkLock = new(1, 1);
 
     /// <summary>
     /// The "just-in-time" window: a meeting is considered starting "right now"
@@ -40,6 +41,17 @@ public class MeetingAlertService
     /// </summary>
     public async Task CheckAndAlertAsync(CancellationToken cancellationToken = default)
     {
+        // Skip rather than queue: if a check is already in progress (e.g. the
+        // foreground service timer and a WorkManager job overlap), discard the
+        // duplicate instead of running two concurrent fetches.
+        if (!await _checkLock.WaitAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false))
+        {
+            _log.Log("CheckAndAlert: skipped (already running).");
+            return;
+        }
+
+        try
+        {
         var now = DateTime.UtcNow;
         var windowStart = now - AlertWindow;
 
@@ -71,6 +83,11 @@ public class MeetingAlertService
                     }
                 }
             }
+        }
+        }
+        finally
+        {
+            _checkLock.Release();
         }
     }
 }

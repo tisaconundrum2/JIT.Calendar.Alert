@@ -11,6 +11,12 @@ public partial class LogViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _debugLog = "(no log entries yet)";
 
+    /// <summary>
+    /// File path of the on-disk crash log, shown in the UI so the user
+    /// knows where to find persisted crash details.
+    /// </summary>
+    public string CrashLogPath => _logger.CrashLogPath;
+
     public LogViewModel(DebugLogService logger)
     {
         _logger = logger;
