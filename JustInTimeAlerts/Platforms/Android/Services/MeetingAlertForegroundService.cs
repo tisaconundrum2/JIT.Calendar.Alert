@@ -34,7 +34,22 @@ public class MeetingAlertForegroundService : Service
             return StartCommandResult.NotSticky;
         }
 
-        StartForeground(ForegroundNotificationId, BuildForegroundNotification());
+        try
+        {
+            StartForeground(ForegroundNotificationId, BuildForegroundNotification());
+        }
+        catch (Android.App.ForegroundServiceStartNotAllowedException ex)
+        {
+            // Android 14+: the dataSync foreground service type has a 6-hour daily
+            // time limit. When that limit is exhausted the OS throws here instead of
+            // crashing the process — log it and stop gracefully. WorkManager's
+            // CalendarSyncWorker will continue to run every 15 minutes as a fallback.
+            var log = IPlatformApplication.Current?.Services?.GetService<DebugLogService>();
+            log?.LogException("[ForegroundService] dataSync time limit exhausted; stopping gracefully", ex);
+            StopSelf();
+            return StartCommandResult.NotSticky;
+        }
+
         _cts = new CancellationTokenSource();
         _ = RunCheckLoopAsync(_cts.Token);
 
