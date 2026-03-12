@@ -260,6 +260,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Bypasses every layer of caching (min-fetch interval, back-off,
+    /// conditional HTTP headers, content-hash dedup) and forces a full
+    /// re-download and re-parse of every active calendar source.
+    /// Use this when you know a new event was just added and cannot wait
+    /// for the next scheduled sync window.
+    /// </summary>
+    [RelayCommand]
+    private async Task ForceSyncAsync()
+    {
+        _logger.Log("Force sync triggered – invalidating all caches.");
+        StatusMessage = "Force syncing…";
+        IsRefreshing = true;
+        try
+        {
+            // Drop every cache entry so GetEventsAsync re-fetches unconditionally.
+            _parser.InvalidateCache();
+
+            var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
+            var allEvents = await FetchAllEventsAsync();
+            RefreshSources();
+            UpdateUpcomingEvents(allEvents);
+            StatusMessage = $"Force sync complete. {allEvents.Count} event(s) loaded across {activeSources.Count} active calendar(s).";
+        }
+        finally
+        {
+            IsRefreshing = false;
+        }
+    }
+
     [RelayCommand]
     private void RemoveCalendar(Guid id)
     {

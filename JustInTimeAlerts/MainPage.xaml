@@ -142,6 +142,11 @@
                             </DataTemplate>
                         </CollectionView.ItemTemplate>
                     </CollectionView>
+
+                    <Button Text="&#x26A1; Force Sync"
+                            Command="{Binding ForceSyncCommand}"
+                            HorizontalOptions="Fill"
+                            ToolTipProperties.Text="Bypass all caches and immediately re-download every active calendar." />
                 </VerticalStackLayout>
             </Frame>
 
