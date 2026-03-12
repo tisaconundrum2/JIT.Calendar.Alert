@@ -336,6 +336,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             _logger.Log($"Backup exported to Downloads: {fileName} ({urlSources.Count} URL(s)).");
             StatusMessage = $"Backup saved to Downloads/{fileName} ({urlSources.Count} calendar URL(s)).";
+            await Shell.Current.DisplayAlert(
+                "Backup Exported",
+                $"Your calendar backup has been saved to your Downloads folder as:\n\n{fileName}\n\n{urlSources.Count} calendar URL(s) exported.",
+                "OK");
         }
         catch (Exception ex)
         {
