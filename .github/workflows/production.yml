@@ -98,5 +98,65 @@ jobs:
         with:
           name: production-apk-${{ steps.version.outputs.tag }}
           path: ${{ steps.find_apk.outputs.apk_path }}
+
+  build-poc:
+    name: Build POC APK (MauiBackgroundServiceDemo)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          DISPLAY_VERSION="${TAG#v}"
+          BUILD_NUMBER=$(echo "$DISPLAY_VERSION" | awk -F. '{printf "%d%03d%03d", $1, $2, $3}')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "display_version=$DISPLAY_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui-android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: '17'
+
+      - name: Restore dependencies
+        run: dotnet restore MauiBackgroundServiceDemo/MauiBackgroundServiceDemo.csproj
+
+      - name: Build unsigned APK
+        run: |
+          dotnet publish MauiBackgroundServiceDemo/MauiBackgroundServiceDemo.csproj \
+            -f net10.0-android \
+            -c Release \
+            -p:ApplicationDisplayVersion=${{ steps.version.outputs.display_version }} \
+            -p:ApplicationVersion=${{ steps.version.outputs.build_number }}
+
+      - name: Find APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find MauiBackgroundServiceDemo/bin/Release/net10.0-android -name "*-Signed.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find MauiBackgroundServiceDemo/bin/Release/net10.0-android -name "*.apk" | head -n 1)
+          fi
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK_PATH"
+
+      - name: Upload POC APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc-apk-${{ steps.version.outputs.tag }}
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          if-no-files-found: error
           if-no-files-found: error
           retention-days: 90

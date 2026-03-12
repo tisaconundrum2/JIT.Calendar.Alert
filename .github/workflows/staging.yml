@@ -108,3 +108,69 @@ jobs:
           path: ${{ steps.find_apk.outputs.apk_path }}
           if-no-files-found: error
           retention-days: 30
+
+  build-poc:
+    name: Build POC APK (MauiBackgroundServiceDemo)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          LATEST_TAG=$(git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            BASE_VERSION="0.1.0"
+          else
+            BASE_VERSION="${LATEST_TAG#v}"
+          fi
+          echo "display_version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "version=v${BASE_VERSION}-poc.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui-android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: '17'
+
+      - name: Restore dependencies
+        run: dotnet restore MauiBackgroundServiceDemo/MauiBackgroundServiceDemo.csproj
+
+      - name: Build unsigned APK
+        run: |
+          dotnet publish MauiBackgroundServiceDemo/MauiBackgroundServiceDemo.csproj \
+            -f net10.0-android \
+            -c Release \
+            -p:ApplicationDisplayVersion=${{ steps.version.outputs.display_version }} \
+            -p:ApplicationVersion=${{ steps.version.outputs.build_number }}
+
+      - name: Find APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find MauiBackgroundServiceDemo/bin/Release/net10.0-android -name "*-Signed.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find MauiBackgroundServiceDemo/bin/Release/net10.0-android -name "*.apk" | head -n 1)
+          fi
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK_PATH"
+
+      - name: Upload POC APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc-apk-${{ steps.version.outputs.version }}
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          if-no-files-found: error
+          retention-days: 30

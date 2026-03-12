@@ -1,23 +1,44 @@
-﻿namespace MauiBackgroundServiceDemo;
+﻿using Microsoft.Maui.Devices.Sensors;
+using MauiBackgroundServiceDemo.Services;
+
+namespace MauiBackgroundServiceDemo;
 
 public partial class MainPage : ContentPage
 {
-	int count = 0;
+    private int _readingCount;
 
-	public MainPage()
-	{
-		InitializeComponent();
-	}
+    public MainPage()
+    {
+        InitializeComponent();
+    }
 
-	private void OnCounterClicked(object? sender, EventArgs e)
-	{
-		count++;
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        AccelerometerBackgroundService.ReadingChanged += OnReadingChanged;
+    }
 
-		if (count == 1)
-			CounterBtn.Text = $"Clicked {count} time";
-		else
-			CounterBtn.Text = $"Clicked {count} times";
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        AccelerometerBackgroundService.ReadingChanged -= OnReadingChanged;
+    }
 
-		SemanticScreenReader.Announce(CounterBtn.Text);
-	}
+    private void OnReadingChanged(object? sender, AccelerometerChangedEventArgs e)
+    {
+        var d = e.Reading.Acceleration;
+        _readingCount++;
+        int count = _readingCount;
+
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            XLabel.Text = $"{d.X:+0.000;-0.000} g";
+            YLabel.Text = $"{d.Y:+0.000;-0.000} g";
+            ZLabel.Text = $"{d.Z:+0.000;-0.000} g";
+            ReadingCountLabel.Text = $"Readings received: {count:N0}";
+
+            StatusDot.Fill = new SolidColorBrush(Colors.LimeGreen);
+            StatusLabel.Text = "Service running";
+        });
+    }
 }
