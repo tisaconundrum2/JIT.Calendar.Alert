@@ -58,11 +58,20 @@ public class MeetingAlertForegroundService : Service
         if (alarmManager != null && pendingIntent != null)
         {
             long triggerAt = SystemClock.ElapsedRealtime() + 1_000; // ~1 second
-            if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
+
+            // Android 12+ (API 31) requires SCHEDULE_EXACT_ALARM or USE_EXACT_ALARM
+            // to call SetExactAndAllowWhileIdle.  Check the runtime capability and
+            // fall back to the inexact variant if permission was not granted.
+            // The service is Sticky so Android will restart it regardless — the
+            // alarm is only a belt-and-suspenders fallback.
+            bool canExact = Build.VERSION.SdkInt < BuildVersionCodes.S
+                            || alarmManager.CanScheduleExactAlarms();
+
+            if (canExact && Build.VERSION.SdkInt >= BuildVersionCodes.M)
                 alarmManager.SetExactAndAllowWhileIdle(
                     AlarmType.ElapsedRealtimeWakeup, triggerAt, pendingIntent);
             else
-                alarmManager.Set(
+                alarmManager.SetAndAllowWhileIdle(
                     AlarmType.ElapsedRealtimeWakeup, triggerAt, pendingIntent);
         }
 
