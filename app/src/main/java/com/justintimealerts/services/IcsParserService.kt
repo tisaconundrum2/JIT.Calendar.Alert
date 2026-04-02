@@ -279,10 +279,10 @@ class IcsParserService(
                 val description = component.getProperty<net.fortuna.ical4j.model.property.Description>(Property.DESCRIPTION)?.value
                 val location = component.getProperty<net.fortuna.ical4j.model.property.Location>(Property.LOCATION)?.value
                 
-                val startInstant = temporalToInstant(dtStart.date)
+                val startInstant = dateToInstant(dtStart.date)
                 val dtEnd = component.getProperty<DtEnd>(Property.DTEND)
                 val endInstant = if (dtEnd != null) {
-                    temporalToInstant(dtEnd.date)
+                    dateToInstant(dtEnd.date)
                 } else {
                     startInstant.plus(Duration.ofHours(1))
                 }
@@ -351,12 +351,11 @@ class IcsParserService(
         }
     }
     
-    private fun temporalToInstant(temporal: Temporal): Instant {
-        return when (temporal) {
-            is java.util.Date -> temporal.toInstant()
-            is net.fortuna.ical4j.model.DateTime -> Instant.ofEpochMilli(temporal.time)
-            is net.fortuna.ical4j.model.Date -> Instant.ofEpochMilli(temporal.time)
-            else -> Instant.now()
+    private fun dateToInstant(date: java.util.Date): Instant {
+        return when (date) {
+            is net.fortuna.ical4j.model.DateTime -> Instant.ofEpochMilli(date.time)
+            is net.fortuna.ical4j.model.Date -> Instant.ofEpochMilli(date.time)
+            else -> date.toInstant()
         }
     }
 }
