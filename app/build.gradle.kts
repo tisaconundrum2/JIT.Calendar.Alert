@@ -17,6 +17,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/groovy/org.codehaus.groovy.runtime.ExtensionModule",
+                "META-INF/groovy/org.codehaus.groovy.runtime.ExtensionModule*",
+                "META-INF/groovy-release-info.properties"
+            )
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
