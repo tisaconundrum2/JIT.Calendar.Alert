@@ -39,28 +39,23 @@ jobs:
           echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "Staging version: $VERSION"
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      - name: Install MAUI workload
-        run: dotnet workload install maui-android
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'microsoft'
+          distribution: 'temurin'
           java-version: '17'
 
-      - name: Restore dependencies
-        run: dotnet restore JustInTimeAlerts/JustInTimeAlerts.csproj
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
       - name: Decode keystore
         id: decode_keystore
         if: env.KEYSTORE_BASE64 != ''
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > JustInTimeAlerts/keystore.jks
+          echo "$KEYSTORE_BASE64" | base64 --decode > app/keystore.jks
           echo "keystore_available=true" >> "$GITHUB_OUTPUT"
 
       - name: Build signed APK
@@ -70,34 +65,25 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          dotnet publish JustInTimeAlerts/JustInTimeAlerts.csproj \
-            -f net9.0-android \
-            -c Release \
-            -p:ApplicationDisplayVersion=${{ steps.version.outputs.display_version }} \
-            -p:ApplicationVersion=${{ steps.version.outputs.build_number }} \
-            -p:AndroidKeyStore=true \
-            -p:AndroidSigningKeyStore=keystore.jks \
-            -p:AndroidSigningKeyAlias="$KEY_ALIAS" \
-            -p:AndroidSigningKeyPass="$KEY_PASSWORD" \
-            -p:AndroidSigningStorePass="$KEYSTORE_PASSWORD"
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$PWD/app/keystore.jks \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD" \
+            -Pandroid.injected.version.name="${{ steps.version.outputs.display_version }}" \
+            -Pandroid.injected.version.code="${{ steps.version.outputs.build_number }}"
 
       - name: Build unsigned APK
         if: steps.decode_keystore.outputs.keystore_available != 'true'
         run: |
-          dotnet publish JustInTimeAlerts/JustInTimeAlerts.csproj \
-            -f net9.0-android \
-            -c Release \
-            -p:ApplicationDisplayVersion=${{ steps.version.outputs.display_version }} \
-            -p:ApplicationVersion=${{ steps.version.outputs.build_number }}
+          ./gradlew assembleRelease \
+            -Pandroid.injected.version.name="${{ steps.version.outputs.display_version }}" \
+            -Pandroid.injected.version.code="${{ steps.version.outputs.build_number }}"
 
       - name: Find APK
         id: find_apk
         run: |
-          # Prefer signed APK, fall back to any APK
-          APK_PATH=$(find JustInTimeAlerts/bin/Release/net9.0-android -name "*-Signed.apk" | head -n 1)
-          if [ -z "$APK_PATH" ]; then
-            APK_PATH=$(find JustInTimeAlerts/bin/Release/net9.0-android -name "*.apk" | head -n 1)
-          fi
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "Found APK: $APK_PATH"
 
