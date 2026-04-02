@@ -157,7 +157,7 @@ fi
 
 # Use "xargs" to parse quoted args.
 #
-# With -n://1 we read one line at a time. We use eval as it reads lines in the
+# With -n1 we read one line at a time. We use eval as it reads lines in the
 # syntax of a shell script.  But: with a single line a trailing newline is
 # missing, so we must append it.  xargs will always quit if find has an error.
 #
@@ -166,7 +166,7 @@ fi
 #   readarray ARGS < <( xargs -n1 <<<"$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" ) &&
 #   set -- "${ARGS[@]}" "$@"
 #
-# but POSIX://sh has://neither arrays nor command substitution, so instead we
+# but POSIX sh has neither arrays nor command substitution, so instead we
 # temporarily extend the arguments and then use shift to get the final arguments.
 eval "set -- $(
         printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
