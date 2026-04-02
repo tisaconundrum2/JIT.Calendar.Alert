@@ -2,6 +2,7 @@
 using Android.App;
 using Android.Content;
 using Android.OS;
+using Android.Runtime;
 using JustInTimeAlerts.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,7 +13,9 @@ namespace JustInTimeAlerts.Platforms.Android.Services;
 /// A <see cref="PeriodicTimer"/> fires every 10 seconds to run the
 /// <see cref="MeetingAlertService"/> logic engine.
 /// </summary>
-[Service(ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeDataSync)]
+[Service(ForegroundServiceType = global::Android.Content.PM.ForegroundService.TypeDataSync,
+         Exported = false)]
+[Register("com.justintimealerts.MeetingAlertForegroundService")]
 public class MeetingAlertForegroundService : Service
 {
     public const int ForegroundNotificationId = 1001;
@@ -31,11 +34,63 @@ public class MeetingAlertForegroundService : Service
             return StartCommandResult.NotSticky;
         }
 
-        StartForeground(ForegroundNotificationId, BuildForegroundNotification());
+        try
+        {
+            StartForeground(ForegroundNotificationId, BuildForegroundNotification());
+        }
+        catch (Android.App.ForegroundServiceStartNotAllowedException ex)
+        {
+            // Android 14+: the dataSync foreground service type has a 6-hour daily
+            // time limit. When that limit is exhausted the OS throws here instead of
+            // crashing the process — log it and stop gracefully. WorkManager's
+            // CalendarSyncWorker will continue to run every 15 minutes as a fallback.
+            var log = IPlatformApplication.Current?.Services?.GetService<DebugLogService>();
+            log?.LogException("[ForegroundService] dataSync time limit exhausted; stopping gracefully", ex);
+            StopSelf();
+            return StartCommandResult.NotSticky;
+        }
+
         _cts = new CancellationTokenSource();
         _ = RunCheckLoopAsync(_cts.Token);
 
         return StartCommandResult.Sticky;
+    }
+
+    public override void OnTaskRemoved(Intent? rootIntent)
+    {
+        // Safety-net: even if Android somehow kills us after a swipe-away,
+        // reschedule a restart ~1 second later via AlarmManager so alerts
+        // never go dark for long.
+        var restartIntent = new Intent(ApplicationContext, typeof(MeetingAlertForegroundService));
+        restartIntent.SetAction(ActionStart);
+        restartIntent.SetPackage(PackageName);
+
+        var pendingIntent = PendingIntent.GetService(
+            this, 1, restartIntent,
+            PendingIntentFlags.OneShot | PendingIntentFlags.Immutable);
+
+        var alarmManager = GetSystemService(AlarmService) as AlarmManager;
+        if (alarmManager != null && pendingIntent != null)
+        {
+            long triggerAt = SystemClock.ElapsedRealtime() + 1_000; // ~1 second
+
+            // Android 12+ (API 31) requires SCHEDULE_EXACT_ALARM or USE_EXACT_ALARM
+            // to call SetExactAndAllowWhileIdle.  Check the runtime capability and
+            // fall back to the inexact variant if permission was not granted.
+            // The service is Sticky so Android will restart it regardless — the
+            // alarm is only a belt-and-suspenders fallback.
+            bool canExact = Build.VERSION.SdkInt < BuildVersionCodes.S
+                            || alarmManager.CanScheduleExactAlarms();
+
+            if (canExact && Build.VERSION.SdkInt >= BuildVersionCodes.M)
+                alarmManager.SetExactAndAllowWhileIdle(
+                    AlarmType.ElapsedRealtimeWakeup, triggerAt, pendingIntent);
+            else
+                alarmManager.SetAndAllowWhileIdle(
+                    AlarmType.ElapsedRealtimeWakeup, triggerAt, pendingIntent);
+        }
+
+        base.OnTaskRemoved(rootIntent);
     }
 
     public override void OnDestroy()
@@ -60,12 +115,23 @@ public class MeetingAlertForegroundService : Service
 
         alertService.MeetingStarting += (_, meeting) => notificationService.Notify(meeting);
 
+        // Align to the next whole minute (XX:XX:00) so checks always fire at a
+        // predictable time regardless of when the service was started.
+        var now = DateTime.UtcNow;
+        var msIntoMinute = now.Second * 1_000 + now.Millisecond;
+        var alignDelay = msIntoMinute == 0
+            ? TimeSpan.Zero
+            : TimeSpan.FromMilliseconds(60_000 - msIntoMinute);
+
+        if (alignDelay > TimeSpan.Zero)
+            await Task.Delay(alignDelay, token).ConfigureAwait(false);
+
         // Poll every 60 seconds — matches the 1-minute AlertWindow and avoids
         // hammering the network. ICS re-fetches are further rate-limited inside
         // IcsParserService (min 15-minute interval + ETag/If-Modified-Since).
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
 
-        // Run immediately on first tick, then every 60 seconds.
+        // Run immediately at the minute boundary, then every 60 seconds.
         await alertService.CheckAndAlertAsync(token).ConfigureAwait(false);
 
         try

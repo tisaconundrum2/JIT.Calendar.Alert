@@ -26,10 +26,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
-    private bool _isServiceRunning;
+    private string _debugLog = "(no log entries yet)";
 
     [ObservableProperty]
-    private string _debugLog = "(no log entries yet)";
+    private bool _isRefreshing;
 
     public ObservableCollection<CalendarSource> CalendarSources { get; } = new();
 
@@ -131,8 +131,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var nowUtc   = DateTime.UtcNow;
         var nowLocal = DateTime.Now;
 
+        var todayLocal = nowLocal.Date;
+
         var groups = allEvents
-            .Where(e => e.Start >= nowUtc)
+            .Where(e => e.Start >= nowUtc && e.Start.ToLocalTime().Date == todayLocal)
             .OrderBy(e => e.Start)
             .GroupBy(e =>
             {
@@ -243,13 +245,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _logger.Log("Manual sync triggered.");
         StatusMessage = "Syncing…";
-        var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
+        IsRefreshing = true;
+        try
+        {
+            var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
+            var allEvents = await FetchAllEventsAsync();
+            RefreshSources();
+            UpdateUpcomingEvents(allEvents);
+            StatusMessage = $"Sync complete. {allEvents.Count} event(s) loaded across {activeSources.Count} active calendar(s).";
+        }
+        finally
+        {
+            IsRefreshing = false;
+        }
+    }
 
-        var allEvents = await FetchAllEventsAsync();
+    /// <summary>
+    /// Bypasses every layer of caching (min-fetch interval, back-off,
+    /// conditional HTTP headers, content-hash dedup) and forces a full
+    /// re-download and re-parse of every active calendar source.
+    /// Use this when you know a new event was just added and cannot wait
+    /// for the next scheduled sync window.
+    /// </summary>
+    [RelayCommand]
+    private async Task ForceSyncAsync()
+    {
+        _logger.Log("Force sync triggered – invalidating all caches.");
+        StatusMessage = "Force syncing…";
+        IsRefreshing = true;
+        try
+        {
+            // Drop every cache entry so GetEventsAsync re-fetches unconditionally.
+            _parser.InvalidateCache();
 
-        RefreshSources();
-        UpdateUpcomingEvents(allEvents);
-        StatusMessage = $"Sync complete. {allEvents.Count} event(s) loaded across {activeSources.Count} active calendar(s).";
+            var activeSources = _repository.Sources.Where(s => s.IsActive).ToList();
+            var allEvents = await FetchAllEventsAsync();
+            RefreshSources();
+            UpdateUpcomingEvents(allEvents);
+            StatusMessage = $"Force sync complete. {allEvents.Count} event(s) loaded across {activeSources.Count} active calendar(s).";
+        }
+        finally
+        {
+            IsRefreshing = false;
+        }
     }
 
     [RelayCommand]
@@ -328,6 +366,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             _logger.Log($"Backup exported to Downloads: {fileName} ({urlSources.Count} URL(s)).");
             StatusMessage = $"Backup saved to Downloads/{fileName} ({urlSources.Count} calendar URL(s)).";
+            await Shell.Current.DisplayAlert(
+                "Backup Exported",
+                $"Your calendar backup has been saved to your Downloads folder as:\n\n{fileName}\n\n{urlSources.Count} calendar URL(s) exported.",
+                "OK");
         }
         catch (Exception ex)
         {
@@ -413,31 +455,4 @@ public partial class MainViewModel : ObservableObject, IDisposable
         StatusMessage = "Debug log cleared.";
     }
 
-    [RelayCommand]
-    private void ToggleService()
-    {
-#if ANDROID
-        var context = global::Android.App.Application.Context;
-        var intent = new global::Android.Content.Intent(
-            context,
-            typeof(Platforms.Android.Services.MeetingAlertForegroundService));
-
-        if (IsServiceRunning)
-        {
-            intent.SetAction(Platforms.Android.Services.MeetingAlertForegroundService.ActionStop);
-            context.StartService(intent);
-            IsServiceRunning = false;
-            StatusMessage = "Background monitoring stopped.";
-        }
-        else
-        {
-            intent.SetAction(Platforms.Android.Services.MeetingAlertForegroundService.ActionStart);
-            context.StartForegroundService(intent);
-            IsServiceRunning = true;
-            StatusMessage = "Background monitoring started.";
-        }
-#else
-        StatusMessage = "Background service is only supported on Android.";
-#endif
-    }
 }

@@ -1,8 +1,12 @@
 using Android.App;
+using Android.Content;
 using Android.Content.PM;
 using Android.OS;
+using Android.Runtime;
 using AndroidX.Work;
 using JustInTimeAlerts.Platforms.Android.Services;
+using JustInTimeAlerts.Services;
+using Microsoft.Maui.Controls;
 
 namespace JustInTimeAlerts;
 
@@ -21,6 +25,11 @@ public class MainActivity : MauiAppCompatActivity
     {
         base.OnCreate(savedInstanceState);
 
+        // Hook the Android JVM unhandled-exception bridge.  This fires for
+        // exceptions that originate on Java/ART threads and would otherwise
+        // crash silently from the managed side's perspective.
+        AndroidEnvironment.UnhandledExceptionRaiser += OnAndroidUnhandledException;
+
         // Request POST_NOTIFICATIONS permission on Android 13+ (API 33+).
         if (Build.VERSION.SdkInt >= (BuildVersionCodes)33)
         {
@@ -29,7 +38,40 @@ public class MainActivity : MauiAppCompatActivity
                 requestCode: 1001);
         }
 
+        // Start the foreground service immediately on every launch so alert
+        // monitoring begins right away without needing a device reboot.
+        // StartForegroundService is idempotent — calling it when the service
+        // is already running simply delivers a new Intent and returns.
+        StartForegroundAlertService();
         ScheduleCalendarSync();
+    }
+
+    private void OnAndroidUnhandledException(object? sender, RaiseThrowableEventArgs e)
+    {
+        try
+        {
+            var log = IPlatformApplication.Current?.Services.GetService<DebugLogService>();
+            log?.LogException("AndroidEnvironment.UnhandledException", e.Exception);
+        }
+        catch { /* last-resort handler — never throw */ }
+
+        e.Handled = false; // allow the default crash dialog / ANR machinery to continue
+    }
+
+    protected override void OnDestroy()
+    {
+        AndroidEnvironment.UnhandledExceptionRaiser -= OnAndroidUnhandledException;
+        base.OnDestroy();
+    }
+
+    /// <summary>
+    /// Launches (or re-delivers to) the <see cref="MeetingAlertForegroundService"/>.
+    /// </summary>
+    private void StartForegroundAlertService()
+    {
+        var serviceIntent = new Intent(this, typeof(MeetingAlertForegroundService));
+        serviceIntent.SetAction(MeetingAlertForegroundService.ActionStart);
+        StartForegroundService(serviceIntent);
     }
 
     /// <summary>

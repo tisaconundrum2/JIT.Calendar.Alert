@@ -78,6 +78,47 @@ public class IcsParserService
     // -----------------------------------------------------------------------
 
     /// <summary>
+    /// Wipes all in-memory cache entries (or a single entry keyed by
+    /// <paramref name="cacheKey"/>) so that the next
+    /// <see cref="GetEventsAsync"/> call performs an unconditional HTTP fetch
+    /// and full re-parse, bypassing the minimum re-fetch interval, back-off,
+    /// conditional-request headers, and content-hash dedup.
+    /// </summary>
+    /// <param name="cacheKey">
+    /// The URL or file path that identifies the source to invalidate.
+    /// Pass <c>null</c> (the default) to invalidate every source at once.
+    /// </param>
+    public void InvalidateCache(string? cacheKey = null)
+    {
+        lock (_cacheLock)
+        {
+            if (cacheKey is null)
+            {
+                foreach (var entry in _cache.Values)
+                    ResetEntry(entry);
+
+                _log.Log($"ICS cache: all {_cache.Count} source(s) invalidated for force-sync.");
+            }
+            else if (_cache.TryGetValue(cacheKey, out var entry))
+            {
+                ResetEntry(entry);
+                _log.Log($"ICS cache: '{cacheKey}' invalidated for force-sync.");
+            }
+        }
+
+        static void ResetEntry(SourceCache e)
+        {
+            e.LastFetchTime       = DateTime.MinValue;
+            e.BackoffUntil        = DateTime.MinValue;
+            e.ContentHash         = null;
+            e.ETag                = null;
+            e.LastModified        = null;
+            e.FileLastWrite       = DateTime.MinValue;
+            e.ConsecutiveFailures = 0;
+        }
+    }
+
+    /// <summary>
     /// Loads events from the given <paramref name="source"/>.
     /// Returns cached events when no network fetch is needed.
     /// Returns an empty list on unrecoverable failure so callers stay clean.

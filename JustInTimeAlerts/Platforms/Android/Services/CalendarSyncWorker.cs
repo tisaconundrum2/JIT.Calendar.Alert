@@ -37,11 +37,22 @@ public class CalendarSyncWorker : Worker
             if (alertService == null || notificationService == null)
                 return Result.InvokeFailure();
 
-            // Wire notifications for this invocation.
-            alertService.MeetingStarting += (_, meeting) => notificationService.Notify(meeting);
-
-            // Worker is already on a background thread — block on the async work.
-            alertService.CheckAndAlertAsync().GetAwaiter().GetResult();
+            // Use a named handler so it can be removed after the work unit
+            // completes. Without this, each WorkManager invocation adds another
+            // permanent subscription to the singleton's event, causing duplicate
+            // notifications over time.
+            EventHandler<MeetingEvent>? handler = null;
+            handler = (_, meeting) => notificationService.Notify(meeting);
+            alertService.MeetingStarting += handler;
+            try
+            {
+                // Worker is already on a background thread — block on the async work.
+                alertService.CheckAndAlertAsync().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                alertService.MeetingStarting -= handler;
+            }
 
             return Result.InvokeSuccess();
         }
