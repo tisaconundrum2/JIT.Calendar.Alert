@@ -20,9 +20,12 @@ android {
     packaging {
         resources {
             excludes += setOf(
-                "META-INF/groovy/org.codehaus.groovy.runtime.ExtensionModule",
-                "META-INF/groovy/org.codehaus.groovy.runtime.ExtensionModule*",
-                "META-INF/groovy-release-info.properties"
+                "META-INF/groovy/**",
+                "META-INF/groovy-release-info.properties",
+                "META-INF/INDEX.LIST",
+                "META-INF/*.SF",
+                "META-INF/*.DSA",
+                "META-INF/*.RSA"
             )
         }
     }
@@ -70,7 +73,11 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     
     // ICS/iCal parsing (ical4j is the standard Java library)
-    implementation("org.mnode.ical4j:ical4j:3.2.14")
+    // Exclude Groovy transitive deps - not needed on Android and cause packaging conflicts
+    implementation("org.mnode.ical4j:ical4j:3.2.14") {
+        exclude(group = "org.codehaus.groovy")
+        exclude(group = "org.apache.groovy")
+    }
     
     // OkHttp for network requests
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
