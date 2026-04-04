@@ -17,6 +17,15 @@ namespace JustInTimeAlerts.Platforms.Android.Services;
 /// </summary>
 public class CalendarSyncWorker : Worker
 {
+    /// <summary>Unique WorkManager task name. Referenced by <c>MainActivity</c> and <c>BootReceiver</c>.</summary>
+    public const string UniqueName = "jit_calendar_sync";
+
+    /// <summary>
+    /// How often WorkManager repeats this worker. Android's minimum is 15 minutes;
+    /// shorter values are silently clamped to this floor.
+    /// </summary>
+    public const int RepeatIntervalMinutes = 15;
+
     public CalendarSyncWorker(Context context, WorkerParameters workerParams)
         : base(context, workerParams) { }
 
