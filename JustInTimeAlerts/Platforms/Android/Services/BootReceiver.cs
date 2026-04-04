@@ -1,4 +1,5 @@
 #if ANDROID
+using Android.App;
 using Android.Content;
 using AndroidX.Work;
 
