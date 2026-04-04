@@ -1,6 +1,7 @@
 #if ANDROID
 using Android.Content;
 using AndroidX.Work;
+using JustInTimeAlerts.Models;
 using JustInTimeAlerts.Services;
 using Microsoft.Extensions.DependencyInjection;
 
