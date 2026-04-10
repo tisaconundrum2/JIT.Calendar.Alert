@@ -38,7 +38,7 @@ public class MeetingAlertForegroundService : Service
         {
             StartForeground(ForegroundNotificationId, BuildForegroundNotification());
         }
-        catch (Android.App.ForegroundServiceStartNotAllowedException ex)
+        catch (global::Android.App.ForegroundServiceStartNotAllowedException ex)
         {
             // Android 14+: the dataSync foreground service type has a 6-hour daily
             // time limit. When that limit is exhausted the OS throws here instead of

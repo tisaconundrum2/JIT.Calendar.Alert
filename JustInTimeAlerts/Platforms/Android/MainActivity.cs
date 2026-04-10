@@ -19,7 +19,7 @@ namespace JustInTimeAlerts;
 public class MainActivity : MauiAppCompatActivity
 {
     /// <summary>Unique name used to avoid duplicate WorkManager entries.</summary>
-    private const string SyncWorkName = "jit_calendar_sync";
+    private const string SyncWorkName = CalendarSyncWorker.UniqueName;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -84,10 +84,9 @@ public class MainActivity : MauiAppCompatActivity
     /// </summary>
     private static void ScheduleCalendarSync()
     {
-        // Android OS minimum is 15 minutes; shorter values are silently clamped.
         var workRequest = new PeriodicWorkRequest.Builder(
                 Java.Lang.Class.FromType(typeof(CalendarSyncWorker)),
-                15,
+                CalendarSyncWorker.RepeatIntervalMinutes,
                 Java.Util.Concurrent.TimeUnit.Minutes!)
             .Build();
 
