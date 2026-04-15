@@ -25,7 +25,7 @@ namespace JustInTimeAlerts.Services;
 ///         so a broken feed never produces an infinite retry loop.</item>
 /// </list>
 /// </remarks>
-public class IcsParserService
+public class IcsParserService : IDisposable
 {
     // -----------------------------------------------------------------------
     // Constants
@@ -45,7 +45,7 @@ public class IcsParserService
     // Per-source in-memory cache
     // -----------------------------------------------------------------------
 
-    private sealed class SourceCache
+    private sealed class SourceCache : IDisposable
     {
         /// <summary>
         /// Ensures only one in-flight HTTP fetch per URL at a time.
@@ -65,6 +65,8 @@ public class IcsParserService
 
         // For local files: track the last write time so we only re-parse on change.
         public DateTime                   FileLastWrite      { get; set; } = DateTime.MinValue;
+
+        public void Dispose() => FetchLock.Dispose();
     }
 
     private readonly Dictionary<string, SourceCache> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -461,6 +463,17 @@ public class IcsParserService
         {
             _log.Log($"ERROR parsing ICS content: {ex.GetType().Name}: {ex.Message}");
             return Array.Empty<MeetingEvent>();
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_cacheLock)
+        {
+            foreach (var entry in _cache.Values)
+                entry.Dispose();
+
+            _cache.Clear();
         }
     }
 }
