@@ -47,6 +47,14 @@ public class IcsParserService
 
     private sealed class SourceCache
     {
+        /// <summary>
+        /// Ensures only one in-flight HTTP fetch per URL at a time.
+        /// A second concurrent caller waits here, then re-checks the cache
+        /// on the inside (double-checked locking) so it returns the result
+        /// from the first caller without issuing a duplicate HTTP request.
+        /// </summary>
+        public SemaphoreSlim              FetchLock          { get; } = new SemaphoreSlim(1, 1);
+
         public string?                    ETag              { get; set; }
         public string?                    LastModified       { get; set; }
         public string?                    ContentHash        { get; set; }
@@ -158,14 +166,38 @@ public class IcsParserService
 
         var now = DateTime.UtcNow;
 
-        // ── Back-off guard ──────────────────────────────────────────────────
+        // ── Fast-path: return cache without acquiring the fetch lock ────────
+        // Both guards are re-checked inside the lock (double-checked pattern).
         if (now < entry.BackoffUntil)
         {
             _log.Log($"ICS [{source.DisplayName}]: in back-off until {entry.BackoffUntil:HH:mm:ss} UTC — returning cache.");
             return entry.Events;
         }
 
-        // ── Minimum re-fetch interval ───────────────────────────────────────
+        if (entry.Events.Count > 0 && (now - entry.LastFetchTime) < MinFetchInterval)
+        {
+            _log.Log($"ICS [{source.DisplayName}]: cache fresh (last fetch {(now - entry.LastFetchTime).TotalMinutes:F1} min ago) — skipping HTTP.");
+            return entry.Events;
+        }
+
+        // ── Serialize concurrent fetches for the same URL ───────────────────
+        // If a second caller arrives while the first is mid-flight it will wait
+        // here, then re-check the guards below and return the already-fetched
+        // cache instead of issuing a duplicate HTTP request.
+        bool lockAcquired = false;
+        try
+        {
+        await entry.FetchLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        lockAcquired = true;
+        now = DateTime.UtcNow; // refresh timestamp after potentially waiting
+
+        // ── Re-check guards inside the lock (double-checked locking) ────────
+        if (now < entry.BackoffUntil)
+        {
+            _log.Log($"ICS [{source.DisplayName}]: in back-off until {entry.BackoffUntil:HH:mm:ss} UTC — returning cache.");
+            return entry.Events;
+        }
+
         if (entry.Events.Count > 0 && (now - entry.LastFetchTime) < MinFetchInterval)
         {
             _log.Log($"ICS [{source.DisplayName}]: cache fresh (last fetch {(now - entry.LastFetchTime).TotalMinutes:F1} min ago) — skipping HTTP.");
@@ -246,6 +278,13 @@ public class IcsParserService
             CaptureResponseHeaders(response, entry);
 
             return parsed;
+        }
+
+        } // end of FetchLock try block
+        finally
+        {
+            if (lockAcquired)
+                entry.FetchLock.Release();
         }
     }
 
