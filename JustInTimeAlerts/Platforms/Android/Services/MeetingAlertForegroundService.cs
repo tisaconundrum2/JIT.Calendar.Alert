@@ -106,13 +106,20 @@ public class MeetingAlertForegroundService : Service
         _cts?.Cancel();
 
         // Wait for the check loop to complete with a reasonable timeout (5 seconds)
-        // to ensure all async operations finish before the service is destroyed
-        if (_checkLoopTask != null && !_checkLoopTask.IsCompleted)
+        // to ensure all async operations finish before the service is destroyed.
+        // 
+        // Note: All async operations in RunCheckLoopAsync respect the cancellation
+        // token and HTTP requests have a 30-second client-side timeout, so with the
+        // cancellation signal, operations should complete well within this window.
+        if (_checkLoopTask != null)
         {
             try
             {
-                // Use GetAwaiter().GetResult() with timeout to avoid deadlocks
-                // (we can't make this method async since it's called from OnDestroy)
+                // Wait() returns true if the task completed, false if timeout occurred.
+                // This is safe here because:
+                // 1. We're called from OnDestroy() which must be synchronous
+                // 2. All async operations respect cancellation tokens
+                // 3. HttpClient has 30-second timeout
                 bool completed = _checkLoopTask.Wait(TimeSpan.FromSeconds(5));
                 
                 if (!completed)
