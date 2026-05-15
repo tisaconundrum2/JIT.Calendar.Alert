@@ -111,8 +111,15 @@ public class MeetingAlertForegroundService : Service
         {
             try
             {
-                // Wait with timeout to avoid blocking indefinitely
-                _checkLoopTask.Wait(TimeSpan.FromSeconds(5));
+                // Use GetAwaiter().GetResult() with timeout to avoid deadlocks
+                // (we can't make this method async since it's called from OnDestroy)
+                bool completed = _checkLoopTask.Wait(TimeSpan.FromSeconds(5));
+                
+                if (!completed)
+                {
+                    var log = IPlatformApplication.Current?.Services?.GetService<DebugLogService>();
+                    log?.Log("[ForegroundService] Warning: Check loop did not complete within 5-second timeout during shutdown");
+                }
             }
             catch (AggregateException ex) when (ex.InnerException is OperationCanceledException)
             {
