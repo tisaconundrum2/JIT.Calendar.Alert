@@ -23,6 +23,7 @@ public class MeetingAlertForegroundService : Service
     public const string ActionStop = "com.justintimealerts.STOP";
 
     private CancellationTokenSource? _cts;
+    private Task? _checkLoopTask;
 
     public override IBinder? OnBind(Intent? intent) => null;
 
@@ -30,7 +31,7 @@ public class MeetingAlertForegroundService : Service
     {
         if (intent?.Action == ActionStop)
         {
-            StopSelf();
+            StopServiceGracefully();
             return StartCommandResult.NotSticky;
         }
 
@@ -46,12 +47,12 @@ public class MeetingAlertForegroundService : Service
             // CalendarSyncWorker will continue to run every 15 minutes as a fallback.
             var log = IPlatformApplication.Current?.Services?.GetService<DebugLogService>();
             log?.LogException("[ForegroundService] dataSync time limit exhausted; stopping gracefully", ex);
-            StopSelf();
+            StopServiceGracefully();
             return StartCommandResult.NotSticky;
         }
 
         _cts = new CancellationTokenSource();
-        _ = RunCheckLoopAsync(_cts.Token);
+        _checkLoopTask = RunCheckLoopAsync(_cts.Token);
 
         return StartCommandResult.Sticky;
     }
@@ -95,10 +96,50 @@ public class MeetingAlertForegroundService : Service
 
     public override void OnDestroy()
     {
+        StopServiceGracefully();
+        base.OnDestroy();
+    }
+
+    private void StopServiceGracefully()
+    {
+        // Cancel the ongoing work
         _cts?.Cancel();
+
+        // Wait for the check loop to complete with a reasonable timeout (5 seconds)
+        // to ensure all async operations finish before the service is destroyed
+        if (_checkLoopTask != null && !_checkLoopTask.IsCompleted)
+        {
+            try
+            {
+                // Wait with timeout to avoid blocking indefinitely
+                _checkLoopTask.Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException)
+            {
+                // Expected when task was cancelled
+            }
+            catch (Exception ex)
+            {
+                var log = IPlatformApplication.Current?.Services?.GetService<DebugLogService>();
+                log?.LogException("[ForegroundService] Error waiting for check loop to complete", ex);
+            }
+        }
+
+        // Clean up resources
         _cts?.Dispose();
         _cts = null;
-        base.OnDestroy();
+        _checkLoopTask = null;
+
+        // Stop the foreground state and notification
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
+            StopForeground(StopForegroundFlags.Remove);
+        else
+#pragma warning disable CS0618 // Type or member is obsolete
+            StopForeground(true);
+#pragma warning restore CS0618
+
+        // Finally, stop the service itself
+        StopSelf();
     }
 
     private async Task RunCheckLoopAsync(CancellationToken token)
