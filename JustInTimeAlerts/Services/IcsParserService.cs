@@ -25,7 +25,7 @@ namespace JustInTimeAlerts.Services;
 ///         so a broken feed never produces an infinite retry loop.</item>
 /// </list>
 /// </remarks>
-public class IcsParserService
+public class IcsParserService : IDisposable
 {
     // -----------------------------------------------------------------------
     // Constants
@@ -45,8 +45,16 @@ public class IcsParserService
     // Per-source in-memory cache
     // -----------------------------------------------------------------------
 
-    private sealed class SourceCache
+    private sealed class SourceCache : IDisposable
     {
+        /// <summary>
+        /// Ensures only one in-flight HTTP fetch per URL at a time.
+        /// A second concurrent caller waits here, then re-checks the cache
+        /// on the inside (double-checked locking) so it returns the result
+        /// from the first caller without issuing a duplicate HTTP request.
+        /// </summary>
+        public SemaphoreSlim              FetchLock          { get; } = new SemaphoreSlim(1, 1);
+
         public string?                    ETag              { get; set; }
         public string?                    LastModified       { get; set; }
         public string?                    ContentHash        { get; set; }
@@ -57,6 +65,8 @@ public class IcsParserService
 
         // For local files: track the last write time so we only re-parse on change.
         public DateTime                   FileLastWrite      { get; set; } = DateTime.MinValue;
+
+        public void Dispose() => FetchLock.Dispose();
     }
 
     private readonly Dictionary<string, SourceCache> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -158,14 +168,38 @@ public class IcsParserService
 
         var now = DateTime.UtcNow;
 
-        // ── Back-off guard ──────────────────────────────────────────────────
+        // ── Fast-path: return cache without acquiring the fetch lock ────────
+        // Both guards are re-checked inside the lock (double-checked pattern).
         if (now < entry.BackoffUntil)
         {
             _log.Log($"ICS [{source.DisplayName}]: in back-off until {entry.BackoffUntil:HH:mm:ss} UTC — returning cache.");
             return entry.Events;
         }
 
-        // ── Minimum re-fetch interval ───────────────────────────────────────
+        if (entry.Events.Count > 0 && (now - entry.LastFetchTime) < MinFetchInterval)
+        {
+            _log.Log($"ICS [{source.DisplayName}]: cache fresh (last fetch {(now - entry.LastFetchTime).TotalMinutes:F1} min ago) — skipping HTTP.");
+            return entry.Events;
+        }
+
+        // ── Serialize concurrent fetches for the same URL ───────────────────
+        // If a second caller arrives while the first is mid-flight it will wait
+        // here, then re-check the guards below and return the already-fetched
+        // cache instead of issuing a duplicate HTTP request.
+        bool lockAcquired = false;
+        try
+        {
+        await entry.FetchLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        lockAcquired = true;
+        now = DateTime.UtcNow; // refresh timestamp after potentially waiting
+
+        // ── Re-check guards inside the lock (double-checked locking) ────────
+        if (now < entry.BackoffUntil)
+        {
+            _log.Log($"ICS [{source.DisplayName}]: in back-off until {entry.BackoffUntil:HH:mm:ss} UTC — returning cache.");
+            return entry.Events;
+        }
+
         if (entry.Events.Count > 0 && (now - entry.LastFetchTime) < MinFetchInterval)
         {
             _log.Log($"ICS [{source.DisplayName}]: cache fresh (last fetch {(now - entry.LastFetchTime).TotalMinutes:F1} min ago) — skipping HTTP.");
@@ -246,6 +280,13 @@ public class IcsParserService
             CaptureResponseHeaders(response, entry);
 
             return parsed;
+        }
+
+        } // end of FetchLock try block
+        finally
+        {
+            if (lockAcquired)
+                entry.FetchLock.Release();
         }
     }
 
@@ -422,6 +463,17 @@ public class IcsParserService
         {
             _log.Log($"ERROR parsing ICS content: {ex.GetType().Name}: {ex.Message}");
             return Array.Empty<MeetingEvent>();
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_cacheLock)
+        {
+            foreach (var entry in _cache.Values)
+                entry.Dispose();
+
+            _cache.Clear();
         }
     }
 }
