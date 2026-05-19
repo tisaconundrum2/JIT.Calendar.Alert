@@ -30,6 +30,17 @@ public class MeetingAlertForegroundService : Service
     {
         if (intent?.Action == ActionStop)
         {
+            // Cancel any running tasks first
+            _cts?.Cancel();
+            
+            // Stop foreground state before stopping the service
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
+                StopForeground(StopForegroundFlags.Remove);
+            else
+#pragma warning disable CS0618 // Type or member is obsolete
+                StopForeground(true);
+#pragma warning restore CS0618 // Type or member is obsolete
+            
             StopSelf();
             return StartCommandResult.NotSticky;
         }
@@ -46,6 +57,15 @@ public class MeetingAlertForegroundService : Service
             // CalendarSyncWorker will continue to run every 15 minutes as a fallback.
             var log = IPlatformApplication.Current?.Services?.GetService<DebugLogService>();
             log?.LogException("[ForegroundService] dataSync time limit exhausted; stopping gracefully", ex);
+            
+            // Ensure foreground state is stopped before stopping the service
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
+                StopForeground(StopForegroundFlags.Remove);
+            else
+#pragma warning disable CS0618 // Type or member is obsolete
+                StopForeground(true);
+#pragma warning restore CS0618 // Type or member is obsolete
+            
             StopSelf();
             return StartCommandResult.NotSticky;
         }
@@ -95,9 +115,19 @@ public class MeetingAlertForegroundService : Service
 
     public override void OnDestroy()
     {
+        // Cancel any running tasks
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+        
+        // Ensure we're no longer in foreground state
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
+            StopForeground(StopForegroundFlags.Remove);
+        else
+#pragma warning disable CS0618 // Type or member is obsolete
+            StopForeground(true);
+#pragma warning restore CS0618 // Type or member is obsolete
+        
         base.OnDestroy();
     }
 
