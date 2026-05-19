@@ -30,6 +30,14 @@ public class MeetingAlertForegroundService : Service
     {
         if (intent?.Action == ActionStop)
         {
+            // Cancel and dispose of any running tasks first
+            _cts?.Cancel();
+            _cts?.Dispose();
+            _cts = null;
+            
+            // Stop foreground state before stopping the service
+            StopForegroundSafely();
+            
             StopSelf();
             return StartCommandResult.NotSticky;
         }
@@ -46,6 +54,10 @@ public class MeetingAlertForegroundService : Service
             // CalendarSyncWorker will continue to run every 15 minutes as a fallback.
             var log = IPlatformApplication.Current?.Services?.GetService<DebugLogService>();
             log?.LogException("[ForegroundService] dataSync time limit exhausted; stopping gracefully", ex);
+            
+            // Ensure foreground state is stopped before stopping the service
+            StopForegroundSafely();
+            
             StopSelf();
             return StartCommandResult.NotSticky;
         }
@@ -95,9 +107,14 @@ public class MeetingAlertForegroundService : Service
 
     public override void OnDestroy()
     {
+        // Cancel any running tasks
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+        
+        // Ensure we're no longer in foreground state
+        StopForegroundSafely();
+        
         base.OnDestroy();
     }
 
@@ -175,6 +192,23 @@ public class MeetingAlertForegroundService : Service
             .SetOngoing(true);
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Stops the foreground state using the appropriate API for the current Android version.
+    /// </summary>
+    private void StopForegroundSafely()
+    {
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
+        {
+            StopForeground(StopForegroundFlags.Remove);
+        }
+        else
+        {
+#pragma warning disable CS0618 // Type or member is obsolete
+            StopForeground(true);
+#pragma warning restore CS0618 // Type or member is obsolete
+        }
     }
 }
 #endif
