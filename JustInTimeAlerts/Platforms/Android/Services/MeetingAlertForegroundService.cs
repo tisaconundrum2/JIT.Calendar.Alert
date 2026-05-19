@@ -34,12 +34,7 @@ public class MeetingAlertForegroundService : Service
             _cts?.Cancel();
             
             // Stop foreground state before stopping the service
-            if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
-                StopForeground(StopForegroundFlags.Remove);
-            else
-#pragma warning disable CS0618 // Type or member is obsolete
-                StopForeground(true);
-#pragma warning restore CS0618 // Type or member is obsolete
+            StopForegroundSafely();
             
             StopSelf();
             return StartCommandResult.NotSticky;
@@ -59,12 +54,7 @@ public class MeetingAlertForegroundService : Service
             log?.LogException("[ForegroundService] dataSync time limit exhausted; stopping gracefully", ex);
             
             // Ensure foreground state is stopped before stopping the service
-            if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
-                StopForeground(StopForegroundFlags.Remove);
-            else
-#pragma warning disable CS0618 // Type or member is obsolete
-                StopForeground(true);
-#pragma warning restore CS0618 // Type or member is obsolete
+            StopForegroundSafely();
             
             StopSelf();
             return StartCommandResult.NotSticky;
@@ -121,12 +111,7 @@ public class MeetingAlertForegroundService : Service
         _cts = null;
         
         // Ensure we're no longer in foreground state
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
-            StopForeground(StopForegroundFlags.Remove);
-        else
-#pragma warning disable CS0618 // Type or member is obsolete
-            StopForeground(true);
-#pragma warning restore CS0618 // Type or member is obsolete
+        StopForegroundSafely();
         
         base.OnDestroy();
     }
@@ -205,6 +190,19 @@ public class MeetingAlertForegroundService : Service
             .SetOngoing(true);
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Stops the foreground state using the appropriate API for the current Android version.
+    /// </summary>
+    private void StopForegroundSafely()
+    {
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
+            StopForeground(StopForegroundFlags.Remove);
+        else
+#pragma warning disable CS0618 // Type or member is obsolete
+            StopForeground(true);
+#pragma warning restore CS0618 // Type or member is obsolete
     }
 }
 #endif
