@@ -30,8 +30,10 @@ public class MeetingAlertForegroundService : Service
     {
         if (intent?.Action == ActionStop)
         {
-            // Cancel any running tasks first
+            // Cancel and dispose of any running tasks first
             _cts?.Cancel();
+            _cts?.Dispose();
+            _cts = null;
             
             // Stop foreground state before stopping the service
             StopForegroundSafely();
@@ -198,11 +200,15 @@ public class MeetingAlertForegroundService : Service
     private void StopForegroundSafely()
     {
         if (Build.VERSION.SdkInt >= BuildVersionCodes.N)
+        {
             StopForeground(StopForegroundFlags.Remove);
+        }
         else
+        {
 #pragma warning disable CS0618 // Type or member is obsolete
             StopForeground(true);
 #pragma warning restore CS0618 // Type or member is obsolete
+        }
     }
 }
 #endif
