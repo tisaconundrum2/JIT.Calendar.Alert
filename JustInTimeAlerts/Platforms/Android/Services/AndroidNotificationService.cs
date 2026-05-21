@@ -53,11 +53,27 @@ public class AndroidNotificationService
     {
         var context = global::Android.App.Application.Context;
 
+        var launchIntent = context.PackageManager?
+            .GetLaunchIntentForPackage(context.PackageName ?? string.Empty);
+        launchIntent?.AddFlags(ActivityFlags.SingleTop);
+
+        PendingIntent? pendingIntent = null;
+        if (launchIntent != null)
+        {
+            var pendingFlags = Build.VERSION.SdkInt >= BuildVersionCodes.M
+                ? PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable
+                : PendingIntentFlags.UpdateCurrent;
+            pendingIntent = PendingIntent.GetActivity(context, 0, launchIntent, pendingFlags);
+        }
+
         var builder = new Notification.Builder(context, ChannelId)
             .SetContentTitle($"Meeting Starting: {meeting.Title}")
             .SetContentText(BuildContentText(meeting))
             .SetSmallIcon(global::Android.Resource.Drawable.IcDialogInfo)
             .SetAutoCancel(true);
+
+        if (pendingIntent != null)
+            builder.SetContentIntent(pendingIntent);
 
         _notificationManager?.Notify(_nextId++, builder.Build());
 
