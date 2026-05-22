@@ -21,6 +21,8 @@ public class MeetingAlertForegroundService : Service
     public const int ForegroundNotificationId = 1001;
     public const string ActionStart = "com.justintimealerts.START";
     public const string ActionStop = "com.justintimealerts.STOP";
+    
+    private const int ShutdownTimeoutSeconds = 3;
 
     private CancellationTokenSource? _cts;
     private Task? _checkLoopTask;
@@ -31,7 +33,9 @@ public class MeetingAlertForegroundService : Service
     {
         if (intent?.Action == ActionStop)
         {
-            // Stop the service asynchronously to wait for pending tasks
+            // Stop the service asynchronously to wait for pending tasks.
+            // Fire-and-forget is safe here because Android keeps the service alive
+            // until StopSelf() is called within StopServiceAsync().
             _ = StopServiceAsync();
             return StartCommandResult.NotSticky;
         }
@@ -108,10 +112,10 @@ public class MeetingAlertForegroundService : Service
             _cts?.Cancel();
             try
             {
-                // Wait up to 3 seconds for the task to complete gracefully.
+                // Wait up to ShutdownTimeoutSeconds for the task to complete gracefully.
                 // This is well within Android's foreground service stop timeout
                 // and should be sufficient for CheckAndAlertAsync to complete.
-                _checkLoopTask.Wait(TimeSpan.FromSeconds(3));
+                _checkLoopTask.Wait(TimeSpan.FromSeconds(ShutdownTimeoutSeconds));
             }
             catch (AggregateException)
             {
@@ -142,8 +146,8 @@ public class MeetingAlertForegroundService : Service
         {
             try
             {
-                // Wait up to 3 seconds for graceful shutdown
-                await _checkLoopTask.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                // Wait up to ShutdownTimeoutSeconds for graceful shutdown
+                await _checkLoopTask.WaitAsync(TimeSpan.FromSeconds(ShutdownTimeoutSeconds)).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
