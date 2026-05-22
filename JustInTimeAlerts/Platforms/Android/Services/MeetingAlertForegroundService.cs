@@ -149,7 +149,7 @@ public class MeetingAlertForegroundService : Service
             {
                 // Task didn't complete in time, but we'll proceed with shutdown anyway
             }
-            catch (OperationCanceledException)
+            catch (System.OperationCanceledException)
             {
                 // Expected when the task was cancelled
             }
