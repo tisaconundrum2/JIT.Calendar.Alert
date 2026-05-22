@@ -17,8 +17,11 @@
 		<ApplicationId>com.justintimealerts.app</ApplicationId>
 
 		<!-- Versions -->
-		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-		<ApplicationVersion>1</ApplicationVersion>
+		<!-- CI workflows will override these during build with specific version numbers -->
+		<!-- For local builds, we generate a unique version code based on current date/time -->
+		<!-- This ensures each local build can update the previous one without package conflicts -->
+		<ApplicationDisplayVersion Condition="'$(ApplicationDisplayVersion)' == ''">1.0.0-dev</ApplicationDisplayVersion>
+		<ApplicationVersion Condition="'$(ApplicationVersion)' == ''">$([System.DateTime]::UtcNow.ToString('yyMMddHHmm'))</ApplicationVersion>
 
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">26.0</SupportedOSPlatformVersion>
 	</PropertyGroup>
