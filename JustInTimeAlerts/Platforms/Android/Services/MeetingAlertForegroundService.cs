@@ -23,6 +23,7 @@ public class MeetingAlertForegroundService : Service
     public const string ActionStop = "com.justintimealerts.STOP";
 
     private CancellationTokenSource? _cts;
+    private Task? _checkLoopTask;
 
     public override IBinder? OnBind(Intent? intent) => null;
 
@@ -30,15 +31,8 @@ public class MeetingAlertForegroundService : Service
     {
         if (intent?.Action == ActionStop)
         {
-            // Cancel and dispose of any running tasks first
-            _cts?.Cancel();
-            _cts?.Dispose();
-            _cts = null;
-            
-            // Stop foreground state before stopping the service
-            StopForegroundSafely();
-            
-            StopSelf();
+            // Stop the service asynchronously to wait for pending tasks
+            _ = StopServiceAsync();
             return StartCommandResult.NotSticky;
         }
 
@@ -63,7 +57,7 @@ public class MeetingAlertForegroundService : Service
         }
 
         _cts = new CancellationTokenSource();
-        _ = RunCheckLoopAsync(_cts.Token);
+        _checkLoopTask = RunCheckLoopAsync(_cts.Token);
 
         return StartCommandResult.Sticky;
     }
@@ -107,15 +101,69 @@ public class MeetingAlertForegroundService : Service
 
     public override void OnDestroy()
     {
-        // Cancel any running tasks
-        _cts?.Cancel();
+        // Use synchronous wait with timeout in OnDestroy to ensure cleanup
+        // completes before the service is destroyed.
+        if (_checkLoopTask != null && !_checkLoopTask.IsCompleted)
+        {
+            _cts?.Cancel();
+            try
+            {
+                // Wait up to 3 seconds for the task to complete gracefully.
+                // This is well within Android's foreground service stop timeout
+                // and should be sufficient for CheckAndAlertAsync to complete.
+                _checkLoopTask.Wait(TimeSpan.FromSeconds(3));
+            }
+            catch (AggregateException)
+            {
+                // Expected if task was cancelled
+            }
+        }
+        
         _cts?.Dispose();
         _cts = null;
+        _checkLoopTask = null;
         
         // Ensure we're no longer in foreground state
         StopForegroundSafely();
         
         base.OnDestroy();
+    }
+
+    /// <summary>
+    /// Asynchronously stops the service by canceling tasks and waiting for completion.
+    /// </summary>
+    private async Task StopServiceAsync()
+    {
+        // Cancel the token first to signal the loop to stop
+        _cts?.Cancel();
+        
+        // Wait for the check loop to finish (with timeout)
+        if (_checkLoopTask != null)
+        {
+            try
+            {
+                // Wait up to 3 seconds for graceful shutdown
+                await _checkLoopTask.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Task didn't complete in time, but we'll proceed with shutdown anyway
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when the task was cancelled
+            }
+        }
+        
+        // Clean up
+        _cts?.Dispose();
+        _cts = null;
+        _checkLoopTask = null;
+        
+        // Stop foreground state before stopping the service
+        StopForegroundSafely();
+        
+        StopSelf();
     }
 
     private async Task RunCheckLoopAsync(CancellationToken token)
