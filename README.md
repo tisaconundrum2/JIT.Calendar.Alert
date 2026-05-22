@@ -102,6 +102,15 @@ JustInTimeAlerts\bin\Release\net9.0-android\publish\com.justintimealerts.app-Sig
 
 > **Note:** `dotnet publish` automatically signs with the debug keystore if no release keystore is configured. For distribution outside the Play Store this is sufficient for personal use.
 
+#### Automatic Version Numbering
+
+The project uses automatic version numbering to prevent "package conflicts" when installing updated APKs:
+
+- **Local builds**: Version code is auto-generated based on the current timestamp (minutes since Jan 1, 2024). Each build gets a unique, incrementing version code, so you can always install over the previous version.
+- **CI builds**: The GitHub Actions workflows override the version with specific values based on tags and run numbers.
+
+You don't need to manually update version numbers - the build system handles this automatically.
+
 #### 2. Transfer the APK to your phone
 
 Copy the APK over USB or via a cloud service, then on your phone:

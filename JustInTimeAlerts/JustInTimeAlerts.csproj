@@ -17,8 +17,12 @@
 		<ApplicationId>com.justintimealerts.app</ApplicationId>
 
 		<!-- Versions -->
-		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-		<ApplicationVersion>1</ApplicationVersion>
+		<!-- CI workflows will override these during build with specific version numbers -->
+		<!-- For local builds, we generate a unique version code based on current timestamp -->
+		<!-- This ensures each local build can update the previous one without package conflicts -->
+		<!-- Format: Unix timestamp / 60 to get minutes since epoch, fits in 32-bit int -->
+		<ApplicationDisplayVersion Condition="'$(ApplicationDisplayVersion)' == ''">1.0.0-dev</ApplicationDisplayVersion>
+		<ApplicationVersion Condition="'$(ApplicationVersion)' == ''">$([System.DateTime]::UtcNow.Subtract($([System.DateTime]::new(2024,1,1))).TotalMinutes.ToString('F0'))</ApplicationVersion>
 
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">26.0</SupportedOSPlatformVersion>
 	</PropertyGroup>
